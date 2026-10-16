@@ -36,6 +36,16 @@ class TaigaSettings(BaseSettings):
         alias="TAIGA_PASSWORD",
         description="Taiga password for auto-authentication",
     )
+    pangolin_access_token_id: Optional[SecretStr] = Field(
+        default=None,
+        alias="PANGOLIN_ACCESS_TOKEN_ID",
+        description="Pangolin resource access token ID",
+    )
+    pangolin_access_token: Optional[SecretStr] = Field(
+        default=None,
+        alias="PANGOLIN_ACCESS_TOKEN",
+        description="Pangolin resource access token secret",
+    )
 
     class Config:
         env_file = str(ENV_FILE_PATH)
@@ -55,6 +65,20 @@ class TaigaSettings(BaseSettings):
     def get_password_value(self) -> Optional[str]:
         """Safely get password value."""
         return self.password.get_secret_value() if self.password else None
+
+    def get_pangolin_credentials(self) -> Optional[tuple[str, str]]:
+        """Return the resource token pair, rejecting incomplete configuration."""
+        token_id = (
+            self.pangolin_access_token_id.get_secret_value()
+            if self.pangolin_access_token_id
+            else None
+        )
+        token = (
+            self.pangolin_access_token.get_secret_value() if self.pangolin_access_token else None
+        )
+        if bool(token_id) != bool(token):
+            raise ValueError("Both Pangolin access token variables are required")
+        return (token_id, token) if token_id and token else None
 
 
 def mask_credential(value: str, visible_chars: int = 2) -> str:

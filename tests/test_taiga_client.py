@@ -3,11 +3,14 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from pytaigaclient.exceptions import TaigaException
 
+from src.config import TaigaSettings
 from src.taiga_client import (
     TaigaClientWrapper,
     _CompatTaigaClient,
+    _PangolinSession,
     resolve_user_id,
     safe_lower,
 )
@@ -122,6 +125,68 @@ class TestTaigaClientWrapperLogin:
             with pytest.raises(TaigaException, match="Unexpected login error"):
                 wrapper.login(username="u", password="p")
         assert wrapper.api is None
+
+    def test_pangolin_headers_survive_login_and_api_request(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        with patch.object(TaigaSettings, "get_pangolin_credentials", return_value=("id", "secret")):
+            with patch.object(_PangolinSession, "request") as request:
+                auth_response = MagicMock(ok=True, status_code=200)
+                auth_response.json.return_value = {"auth_token": "taiga"}
+                api_response = MagicMock(ok=True, status_code=200)
+                api_response.json.return_value = {"projects": []}
+                request.side_effect = [auth_response, api_response]
+                wrapper.login("u", "p")
+                wrapper.api.get("/projects")
+        assert request.call_count == 2
+        assert request.call_args_list[0].kwargs["headers"]["P-Access-Token"] == "secret"
+        assert request.call_args_list[1].kwargs["headers"]["P-Access-Token"] == "secret"
+        assert request.call_args_list[1].kwargs["headers"]["Authorization"] == "Bearer taiga"
+        assert wrapper.api.session.headers["P-Access-Token-Id"] == "id"
+        assert wrapper.api.session.headers["P-Access-Token"] == "secret"
+
+    def test_pangolin_headers_are_recreated_on_login(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        with patch.object(TaigaSettings, "get_pangolin_credentials", return_value=("id", "secret")):
+            with patch.object(_CompatTaigaClient, "_request", return_value={"auth_token": "taiga"}):
+                wrapper.login("u", "p")
+                first_session = wrapper.api.session
+                wrapper.login("u", "p")
+        assert wrapper.api.session is not first_session
+        assert wrapper.api.session.headers["P-Access-Token"] == "secret"
+
+    def test_incomplete_pangolin_configuration_does_not_log_secret(self, caplog):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        with patch.object(
+            TaigaSettings,
+            "get_pangolin_credentials",
+            side_effect=ValueError("Both Pangolin access token variables are required"),
+        ):
+            with pytest.raises(
+                TaigaException, match="Both Pangolin access token variables are required"
+            ):
+                wrapper.login("u", "p")
+        assert "secret" not in caplog.text
+
+
+def test_pangolin_settings_require_both_values():
+    complete = TaigaSettings(PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="secret")
+    assert complete.get_pangolin_credentials() == ("id", "secret")
+    partial = TaigaSettings(PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="")
+    with pytest.raises(ValueError, match="Both Pangolin"):
+        partial.get_pangolin_credentials()
+
+
+def test_pangolin_session_strips_credentials_on_cross_origin_redirect():
+    session = _PangolinSession()
+    original = requests.Request("GET", "https://taiga.example/api/v1/projects").prepare()
+    redirected = requests.Request("GET", "https://other.example/projects").prepare()
+    redirected.headers["P-Access-Token-Id"] = "id"
+    redirected.headers["P-Access-Token"] = "secret"
+    response = requests.Response()
+    response.request = original
+    session.rebuild_auth(redirected, response)
+    assert "P-Access-Token-Id" not in redirected.headers
+    assert "P-Access-Token" not in redirected.headers
 
 
 class TestSafeLower:

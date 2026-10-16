@@ -2,8 +2,11 @@
 import logging
 from typing import Any, Dict, List, Optional
 
+import requests
 from pytaigaclient import TaigaClient
 from pytaigaclient.exceptions import TaigaException
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,18 @@ _RESOURCE_ENDPOINTS = {
 }
 
 _NO_PAGINATION_HEADERS = {"x-disable-pagination": "True"}
+
+
+class _PangolinSession(requests.Session):
+    """Keep resource credentials on the Taiga origin during redirects."""
+
+    def rebuild_auth(
+        self, prepared_request: requests.PreparedRequest, response: requests.Response
+    ) -> None:
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            prepared_request.headers.pop("P-Access-Token-Id", None)
+            prepared_request.headers.pop("P-Access-Token", None)
+        super().rebuild_auth(prepared_request, response)
 
 
 def safe_lower(value: Any) -> str:
@@ -136,7 +151,20 @@ class TaigaClientWrapper:
             # SECURITY: Don't log username to avoid credential exposure
             logger.info(f"Attempting login on {self.host}")
             # Initialize the client here (compat subclass; see _CompatTaigaClient).
-            api_instance = _CompatTaigaClient(host=self.host)
+            pangolin_credentials = settings.get_pangolin_credentials()
+            if pangolin_credentials:
+                # pytaigaclient logs complete request headers at DEBUG level.
+                logging.getLogger("pytaigaclient.client").setLevel(logging.INFO)
+                session = _PangolinSession()
+                session.headers.update(
+                    {
+                        "P-Access-Token-Id": pangolin_credentials[0],
+                        "P-Access-Token": pangolin_credentials[1],
+                    }
+                )
+                api_instance = _CompatTaigaClient(host=self.host, session=session)
+            else:
+                api_instance = _CompatTaigaClient(host=self.host)
             # Use the auth resource's login method
             api_instance.auth.login(username=username, password=password)
             self.api = api_instance

@@ -249,6 +249,8 @@ The bridge can be configured through environment variables or a `.env` file:
 | `TAIGA_API_URL` | Base URL for the Taiga API | http://localhost:9000 |
 | `TAIGA_USERNAME` | Taiga username for auto-authentication | (none) |
 | `TAIGA_PASSWORD` | Taiga password for auto-authentication | (none) |
+| `PANGOLIN_ACCESS_TOKEN_ID` | Pangolin resource access token ID | (none) |
+| `PANGOLIN_ACCESS_TOKEN` | Pangolin resource access token secret | (none) |
 | `TAIGA_TRANSPORT` | Transport mode (stdio, sse, or streamable-http) | stdio |
 | `MCP_HOST` | Bind address for SSE/HTTP transport. Use `0.0.0.0` for Docker. | 127.0.0.1 |
 | `MCP_PORT` | Listen port for SSE/HTTP transport | 8000 |
@@ -263,6 +265,25 @@ TAIGA_PASSWORD=your_password
 TAIGA_TRANSPORT=stdio
 LOG_LEVEL=INFO
 ```
+
+### Taiga behind Pangolin
+
+If Pangolin protects your Taiga API as a public resource, create a resource access
+token in the Pangolin dashboard and set both `PANGOLIN_ACCESS_TOKEN_ID` and
+`PANGOLIN_ACCESS_TOKEN`. The bridge adds Pangolin's two headers to the HTTP session
+used for Taiga login and subsequent API requests. Your Taiga username and password
+are still required for Taiga authentication.
+
+To open the Pangolin dashboard and save the token pair in your local, ignored `.env`:
+
+```bash
+uv run mcp-taiga-pangolin-setup --dashboard-url https://connect.alternadevstudio.com
+```
+
+The command asks for the token ID and secret after you sign in and create the token.
+It does not obtain a token from browser login automatically. Restart the MCP server
+after setup. For Docker, pass both variables into the container as environment
+variables. Scope the token to the Taiga resource and set an appropriate expiry.
 
 **Security Note**: Credentials are protected and will never appear in logs, error messages, or stack traces. When `TAIGA_USERNAME` and `TAIGA_PASSWORD` are configured, the server auto-authenticates on startup - no manual login required.
 
