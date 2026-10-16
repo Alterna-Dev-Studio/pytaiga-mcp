@@ -97,7 +97,10 @@ class TestTaigaClientWrapperLogin:
 
     @pytest.fixture(autouse=True)
     def _without_local_pangolin_config(self):
-        with patch.object(TaigaSettings, "get_pangolin_credentials", return_value=None):
+        with (
+            patch.object(TaigaSettings, "get_pangolin_credentials", return_value=None),
+            patch.object(TaigaSettings, "get_pangolin_share_link", return_value=None),
+        ):
             yield
 
     def test_init_rejects_empty_host(self):
@@ -172,6 +175,60 @@ class TestTaigaClientWrapperLogin:
                 wrapper.login("u", "p")
         assert "secret" not in caplog.text
 
+    def test_share_link_exchanges_for_resource_cookie_before_taiga_login(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        dashboard_response = MagicMock(ok=True)
+        dashboard_response.json.return_value = {
+            "data": {"session": "short-lived", "redirectUrl": "https://taiga.example/discover"}
+        }
+        exchange_response = MagicMock(status_code=302)
+        fake_api = MagicMock()
+        with (
+            patch.object(
+                TaigaSettings,
+                "get_pangolin_share_link",
+                return_value=("https://connect.example", "share-secret"),
+            ),
+            patch.object(requests.Session, "post", return_value=dashboard_response) as post,
+            patch.object(_PangolinSession, "get", autospec=True) as get,
+            patch("src.taiga_client._CompatTaigaClient", return_value=fake_api) as client,
+        ):
+
+            def exchange_cookie(self, *args, **kwargs):
+                self.cookies.set("resource", "cookie", domain="taiga.example")
+                return exchange_response
+
+            get.side_effect = exchange_cookie
+            assert wrapper.login("u", "p")
+        post.assert_called_once()
+        assert post.call_args.args[0] == "https://connect.example/api/v1/auth/access-token"
+        assert post.call_args.kwargs["json"] == {"accessToken": "share-secret"}
+        assert "resource_session_request_param=short-lived" in get.call_args.args[1]
+        assert get.call_args.kwargs["allow_redirects"] is False
+        assert client.call_args.kwargs["session"] is get.call_args.args[0]
+        fake_api.auth.login.assert_called_once_with(username="u", password="p")
+
+    def test_share_link_rejects_wrong_resource_without_exposing_secret(self, caplog):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        dashboard_response = MagicMock(ok=True)
+        dashboard_response.json.return_value = {
+            "data": {"session": "short-lived", "redirectUrl": "https://other.example/discover"}
+        }
+        with (
+            patch.object(
+                TaigaSettings,
+                "get_pangolin_share_link",
+                return_value=("https://connect.example", "share-secret"),
+            ),
+            patch.object(requests.Session, "post", return_value=dashboard_response),
+            patch.object(_PangolinSession, "get") as get,
+        ):
+            with pytest.raises(TaigaException, match="different Taiga resource"):
+                wrapper.login("u", "p")
+        get.assert_not_called()
+        assert "share-secret" not in caplog.text
+        assert "short-lived" not in caplog.text
+
 
 def test_pangolin_settings_require_both_values():
     complete = TaigaSettings(PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="secret")
@@ -195,6 +252,15 @@ def test_pangolin_settings_accept_share_link_url():
         PANGOLIN_RESOURCE_TOKEN="https://taiga.example/?p_token=id.secret",
     )
     assert settings.get_pangolin_credentials() == ("id", "secret")
+
+
+def test_pangolin_settings_accept_dashboard_share_link():
+    settings = TaigaSettings(
+        TAIGA_API_URL="https://taiga.example",
+        PANGOLIN_RESOURCE_TOKEN="https://connect.example/s/share-secret",
+    )
+    assert settings.get_pangolin_share_link() == ("https://connect.example", "share-secret")
+    assert settings.get_pangolin_credentials() is None
 
 
 def test_pangolin_settings_accept_combined_token_in_legacy_variable():

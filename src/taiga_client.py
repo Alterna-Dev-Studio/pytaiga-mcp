@@ -1,6 +1,7 @@
 # taiga_client.py
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from pytaigaclient import TaigaClient
@@ -44,6 +45,51 @@ class _PangolinSession(requests.Session):
             prepared_request.headers.pop("P-Access-Token-Id", None)
             prepared_request.headers.pop("P-Access-Token", None)
         super().rebuild_auth(prepared_request, response)
+
+
+def _start_pangolin_share_session(
+    session: _PangolinSession,
+    dashboard: str,
+    secret: str,
+    taiga_host: str,
+    request_param: str,
+) -> None:
+    """Exchange a dashboard Share Link for a cookie on the Taiga resource."""
+    if not request_param or not request_param.isidentifier():
+        raise ValueError("Invalid Pangolin session request parameter")
+    try:
+        with requests.Session() as dashboard_session:
+            response = dashboard_session.post(
+                f"{dashboard}/api/v1/auth/access-token",
+                json={"accessToken": secret},
+                headers={"X-CSRF-Token": "x-csrf-protection"},
+                allow_redirects=False,
+                timeout=10,
+            )
+        if not response.ok:
+            raise ValueError("Pangolin rejected the Share Link")
+        data = response.json().get("data", {})
+        redirect_url = data.get("redirectUrl")
+        request_token = data.get("session")
+        if not isinstance(redirect_url, str) or not isinstance(request_token, str):
+            raise ValueError("Pangolin returned an invalid Share Link response")
+        resource = urlsplit(redirect_url)
+        expected = urlsplit(taiga_host)
+        if (
+            resource.scheme != expected.scheme
+            or resource.netloc != expected.netloc
+            or resource.username
+            or resource.password
+        ):
+            raise ValueError("Pangolin Share Link points to a different Taiga resource")
+        query = parse_qsl(resource.query, keep_blank_values=True)
+        query.append((request_param, request_token))
+        exchange_url = urlunsplit(resource._replace(query=urlencode(query)))
+        exchange = session.get(exchange_url, allow_redirects=False, timeout=10)
+        if exchange.status_code not in (301, 302, 303, 307, 308) or not session.cookies:
+            raise ValueError("Pangolin did not establish a Taiga resource session")
+    except requests.RequestException:
+        raise ValueError("Pangolin Share Link authentication request failed") from None
 
 
 def safe_lower(value: Any) -> str:
@@ -151,17 +197,26 @@ class TaigaClientWrapper:
             # SECURITY: Don't log username to avoid credential exposure
             logger.info(f"Attempting login on {self.host}")
             # Initialize the client here (compat subclass; see _CompatTaigaClient).
+            pangolin_share_link = settings.get_pangolin_share_link()
             pangolin_credentials = settings.get_pangolin_credentials()
-            if pangolin_credentials:
+            if pangolin_share_link or pangolin_credentials:
                 # pytaigaclient logs complete request headers at DEBUG level.
                 logging.getLogger("pytaigaclient.client").setLevel(logging.INFO)
                 session = _PangolinSession()
-                session.headers.update(
-                    {
-                        "P-Access-Token-Id": pangolin_credentials[0],
-                        "P-Access-Token": pangolin_credentials[1],
-                    }
-                )
+                if pangolin_share_link:
+                    _start_pangolin_share_session(
+                        session,
+                        *pangolin_share_link,
+                        self.host,
+                        settings.pangolin_session_request_param,
+                    )
+                else:
+                    session.headers.update(
+                        {
+                            "P-Access-Token-Id": pangolin_credentials[0],
+                            "P-Access-Token": pangolin_credentials[1],
+                        }
+                    )
                 api_instance = _CompatTaigaClient(host=self.host, session=session)
             else:
                 api_instance = _CompatTaigaClient(host=self.host)

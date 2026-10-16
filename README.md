@@ -249,7 +249,8 @@ The bridge can be configured through environment variables or a `.env` file:
 | `TAIGA_API_URL` | Base URL for the Taiga API | http://localhost:9000 |
 | `TAIGA_USERNAME` | Taiga username for auto-authentication | (none) |
 | `TAIGA_PASSWORD` | Taiga password for auto-authentication | (none) |
-| `PANGOLIN_RESOURCE_TOKEN` | Pangolin Share Link token in `ID.token` form | (none) |
+| `PANGOLIN_RESOURCE_TOKEN` | Pangolin `/s/…` Share Link URL or `ID.token` | (none) |
+| `PANGOLIN_SESSION_REQUEST_PARAM` | Pangolin resource session request parameter | `resource_session_request_param` |
 | `PANGOLIN_ACCESS_TOKEN_ID` | Pangolin resource access token ID | (none) |
 | `PANGOLIN_ACCESS_TOKEN` | Pangolin resource access token secret | (none) |
 | `TAIGA_TRANSPORT` | Transport mode (stdio, sse, or streamable-http) | stdio |
@@ -275,9 +276,12 @@ Taiga resource and copy the link URL (or its `p_token=ID.token` value). The
 resource picker initially shows only 10 entries; search by the Taiga hostname.
 If Taiga is absent after searching, check **Settings → Resources** in the same
 organization and confirm that the Taiga hostname is registered there.
-Set `PANGOLIN_RESOURCE_TOKEN` to the URL or the `ID.token` value. The bridge
-checks that a pasted URL matches `TAIGA_API_URL` and splits the token into Pangolin's
-two HTTP headers for Taiga login and subsequent API requests. The separate
+Set `PANGOLIN_RESOURCE_TOKEN` to the URL or the `ID.token` value. A dashboard
+`https://…/s/…` link is exchanged for a resource session cookie before Taiga
+login. The dashboard hostname can differ from `TAIGA_API_URL`; the bridge checks
+that Pangolin redirects to the configured Taiga origin. For a resource URL with
+`p_token=ID.token`, the bridge checks the resource hostname and sends Pangolin's
+two HTTP headers on Taiga requests. The separate
 `PANGOLIN_ACCESS_TOKEN_ID` and `PANGOLIN_ACCESS_TOKEN` variables remain supported.
 For existing setups, a combined `ID.token` value in `PANGOLIN_ACCESS_TOKEN`
 also works without a separate ID.
@@ -301,7 +305,9 @@ printf '%s\n' "$PANGOLIN_SHARE_LINK" | uv run mcp-taiga-pangolin-setup --token-s
 
 It does not obtain a token from browser login automatically. Restart the MCP server
 after setup. For Docker, pass `PANGOLIN_RESOURCE_TOKEN` into the container as an environment
-variables. Scope the token to the Taiga resource and set an appropriate expiry.
+variable. Pangolin may use a different resource session request parameter; set
+`PANGOLIN_SESSION_REQUEST_PARAM` to match your Pangolin configuration if needed.
+Scope the token to the Taiga resource and set an appropriate expiry.
 
 **Security Note**: Credentials are protected and will never appear in logs, error messages, or stack traces. When `TAIGA_USERNAME` and `TAIGA_PASSWORD` are configured, the server auto-authenticates on startup - no manual login required.
 

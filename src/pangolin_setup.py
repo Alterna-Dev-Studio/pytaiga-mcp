@@ -8,7 +8,12 @@ import webbrowser
 
 from dotenv import dotenv_values, set_key, unset_key
 
-from src.config import ENV_FILE_PATH, settings, split_pangolin_resource_token
+from src.config import (
+    ENV_FILE_PATH,
+    parse_pangolin_share_link,
+    settings,
+    split_pangolin_resource_token,
+)
 
 
 def main() -> None:
@@ -34,7 +39,7 @@ def main() -> None:
 
     print("Sign in to Pangolin, select View as Admin, then Settings > Share Links.")
     print("Search the resource picker for the Taiga hostname, then create a Share Link.")
-    print("Copy the Share Link URL or its ID.token value.")
+    print("Copy the dashboard /s/ Share Link URL or its ID.token value.")
     print(f"Dashboard: {args.dashboard_url}")
     if args.token_stdin:
         value = sys.stdin.readline().strip()
@@ -46,13 +51,17 @@ def main() -> None:
         except (EOFError, KeyboardInterrupt):
             parser.exit(2, "\nSetup cancelled; .env was not changed.\n")
     try:
-        token_id, token = split_pangolin_resource_token(combined, settings.host)
+        if parse_pangolin_share_link(combined):
+            saved_value = combined
+        else:
+            token_id, token = split_pangolin_resource_token(combined, settings.host)
+            saved_value = f"{token_id}.{token}"
     except ValueError as error:
         parser.error(f"{error}; .env was not changed")
 
     ENV_FILE_PATH.touch(mode=0o600, exist_ok=True)
     os.chmod(ENV_FILE_PATH, 0o600)
-    set_key(str(ENV_FILE_PATH), "PANGOLIN_RESOURCE_TOKEN", f"{token_id}.{token}")
+    set_key(str(ENV_FILE_PATH), "PANGOLIN_RESOURCE_TOKEN", saved_value)
     existing = dotenv_values(ENV_FILE_PATH)
     for key in ("PANGOLIN_ACCESS_TOKEN_ID", "PANGOLIN_ACCESS_TOKEN"):
         if key in existing:

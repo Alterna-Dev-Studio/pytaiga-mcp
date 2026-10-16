@@ -36,6 +36,26 @@ def split_pangolin_resource_token(
     return parts[0], parts[1]
 
 
+def parse_pangolin_share_link(value: str) -> Optional[tuple[str, str]]:
+    """Return the dashboard origin and secret from Pangolin's /s/ link."""
+    link = urlsplit(value)
+    if not link.path.startswith("/s/"):
+        return None
+    secret = link.path.removeprefix("/s/")
+    if (
+        link.scheme != "https"
+        or not link.hostname
+        or link.username
+        or link.password
+        or not secret
+        or "/" in secret
+        or link.query
+        or link.fragment
+    ):
+        raise ValueError("Pangolin Share Link must be an HTTPS /s/<token> URL")
+    return f"{link.scheme}://{link.netloc}", secret
+
+
 # Load .env file from project root
 load_dotenv(dotenv_path=ENV_FILE_PATH)
 
@@ -74,7 +94,12 @@ class TaigaSettings(BaseSettings):
     pangolin_resource_token: Optional[SecretStr] = Field(
         default=None,
         alias="PANGOLIN_RESOURCE_TOKEN",
-        description="Combined Pangolin Share Link token (ID.token)",
+        description="Pangolin /s/ Share Link URL or combined token (ID.token)",
+    )
+    pangolin_session_request_param: str = Field(
+        default="resource_session_request_param",
+        alias="PANGOLIN_SESSION_REQUEST_PARAM",
+        description="Pangolin's resource session request query parameter",
     )
 
     class Config:
@@ -100,6 +125,8 @@ class TaigaSettings(BaseSettings):
         """Return the resource token pair, rejecting incomplete configuration."""
         if self.pangolin_resource_token:
             combined = self.pangolin_resource_token.get_secret_value()
+            if parse_pangolin_share_link(combined):
+                return None
             return split_pangolin_resource_token(combined, self.host)
         token_id = (
             self.pangolin_access_token_id.get_secret_value()
@@ -114,6 +141,11 @@ class TaigaSettings(BaseSettings):
         if bool(token_id) != bool(token):
             raise ValueError("Both Pangolin access token variables are required")
         return (token_id, token) if token_id and token else None
+
+    def get_pangolin_share_link(self) -> Optional[tuple[str, str]]:
+        if not self.pangolin_resource_token:
+            return None
+        return parse_pangolin_share_link(self.pangolin_resource_token.get_secret_value())
 
 
 def mask_credential(value: str, visible_chars: int = 2) -> str:

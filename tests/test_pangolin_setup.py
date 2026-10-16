@@ -69,6 +69,20 @@ def test_setup_extracts_token_from_share_link(tmp_path, monkeypatch):
     assert dotenv_values(env_file)["PANGOLIN_RESOURCE_TOKEN"] == "id.secret"
 
 
+def test_setup_saves_dashboard_share_link(tmp_path, monkeypatch, capsys):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(pangolin_setup, "ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(pangolin_setup.settings, "host", "https://taiga.example")
+    monkeypatch.setattr(sys, "argv", ["mcp-taiga-pangolin-setup", "--token-stdin"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("https://connect.example/s/share-secret\n"))
+    pangolin_setup.main()
+    assert (
+        dotenv_values(env_file)["PANGOLIN_RESOURCE_TOKEN"]
+        == "https://connect.example/s/share-secret"
+    )
+    assert "share-secret" not in capsys.readouterr().out
+
+
 def test_setup_rejects_link_for_different_resource(tmp_path, monkeypatch, capsys):
     env_file = tmp_path / ".env"
     monkeypatch.setattr(pangolin_setup, "ENV_FILE_PATH", env_file)
