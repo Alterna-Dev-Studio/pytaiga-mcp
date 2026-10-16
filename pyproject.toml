@@ -31,7 +31,6 @@ dev = [
 [project.scripts]
 mcp-taiga-workflow = "src.server_workflow:main"
 mcp-taiga-full = "src.server_full:main"
-mcp-taiga-pangolin-setup = "src.pangolin_setup:main"
 
 [project.readme]
 file = "README.md"

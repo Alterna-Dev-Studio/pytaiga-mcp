@@ -290,17 +290,20 @@ An organization Settings → API Keys key is for Pangolin's management API, and
 a `pangolin-key-…` key is for Pangolin's AI Gateway. Neither grants access to
 a protected Taiga HTTP resource.
 
-To open the Pangolin dashboard and save the Share Link token in your local, ignored `.env`:
+Save the Share Link in the local, ignored `.env` file as
+`PANGOLIN_RESOURCE_TOKEN`. If you use the shared SAASDK toolkit, its setup
+command can open the Pangolin dashboard and write that value for this or other
+consumer repositories:
 
 ```bash
-uv run mcp-taiga-pangolin-setup --dashboard-url https://connect.alternadevstudio.com
+saasdk pangolin-setup --env-file .env
 ```
 
-Run this command in an interactive terminal. Paste the complete Share Link URL
-when prompted. In a non-interactive shell, pipe the link on standard input:
+Run it from this repository in an interactive terminal and paste the complete
+Share Link URL. In a non-interactive shell, pipe the link on standard input:
 
 ```bash
-printf '%s\n' "$PANGOLIN_SHARE_LINK" | uv run mcp-taiga-pangolin-setup --token-stdin
+printf '%s\n' "$PANGOLIN_SHARE_LINK" | saasdk pangolin-setup --env-file .env --token-stdin
 ```
 
 It does not obtain a token from browser login automatically. Restart the MCP server

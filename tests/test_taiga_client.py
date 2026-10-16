@@ -231,9 +231,13 @@ class TestTaigaClientWrapperLogin:
 
 
 def test_pangolin_settings_require_both_values():
-    complete = TaigaSettings(PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="secret")
+    complete = TaigaSettings(
+        PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="secret"
+    )
     assert complete.get_pangolin_credentials() == ("id", "secret")
-    partial = TaigaSettings(PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="")
+    partial = TaigaSettings(
+        PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN=""
+    )
     with pytest.raises(ValueError, match="Both Pangolin"):
         partial.get_pangolin_credentials()
 
@@ -264,12 +268,14 @@ def test_pangolin_settings_accept_dashboard_share_link():
 
 
 def test_pangolin_settings_accept_combined_token_in_legacy_variable():
-    settings = TaigaSettings(PANGOLIN_ACCESS_TOKEN="id.secret")
+    settings = TaigaSettings(PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN="id.secret")
     assert settings.get_pangolin_credentials() == ("id", "secret")
 
 
 def test_pangolin_settings_reject_ai_gateway_key():
-    settings = TaigaSettings(PANGOLIN_ACCESS_TOKEN="pangolin-key-id.secret")
+    settings = TaigaSettings(
+        PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN="pangolin-key-id.secret"
+    )
     with pytest.raises(ValueError, match="AI Gateway keys"):
         settings.get_pangolin_credentials()
 
