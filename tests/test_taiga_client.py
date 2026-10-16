@@ -95,6 +95,11 @@ class TestBuggyTasksMethodsNowWork:
 class TestTaigaClientWrapperLogin:
     """Cover the auth path: empty-host guard, success, and the two failure modes."""
 
+    @pytest.fixture(autouse=True)
+    def _without_local_pangolin_config(self):
+        with patch.object(TaigaSettings, "get_pangolin_credentials", return_value=None):
+            yield
+
     def test_init_rejects_empty_host(self):
         with pytest.raises(ValueError, match="host URL cannot be empty"):
             TaigaClientWrapper(host="")
@@ -174,6 +179,25 @@ def test_pangolin_settings_require_both_values():
     partial = TaigaSettings(PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="")
     with pytest.raises(ValueError, match="Both Pangolin"):
         partial.get_pangolin_credentials()
+
+
+def test_pangolin_settings_accept_combined_resource_token():
+    settings = TaigaSettings(PANGOLIN_RESOURCE_TOKEN="id.secret")
+    assert settings.get_pangolin_credentials() == ("id", "secret")
+    malformed = TaigaSettings(PANGOLIN_RESOURCE_TOKEN="secret")
+    with pytest.raises(ValueError, match="ID.token"):
+        malformed.get_pangolin_credentials()
+
+
+def test_pangolin_settings_accept_combined_token_in_legacy_variable():
+    settings = TaigaSettings(PANGOLIN_ACCESS_TOKEN="id.secret")
+    assert settings.get_pangolin_credentials() == ("id", "secret")
+
+
+def test_pangolin_settings_reject_ai_gateway_key():
+    settings = TaigaSettings(PANGOLIN_ACCESS_TOKEN="pangolin-key-id.secret")
+    with pytest.raises(ValueError, match="AI Gateway keys"):
+        settings.get_pangolin_credentials()
 
 
 def test_pangolin_session_strips_credentials_on_cross_origin_redirect():

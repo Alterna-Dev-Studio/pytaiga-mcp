@@ -11,6 +11,20 @@ from pydantic_settings import BaseSettings
 PROJECT_ROOT = Path(__file__).parent.parent
 ENV_FILE_PATH = PROJECT_ROOT / ".env"
 
+
+def split_pangolin_resource_token(value: str) -> tuple[str, str]:
+    """Parse a Share Link credential without accepting AI Gateway keys."""
+    if value.startswith("pangolin-key-"):
+        raise ValueError(
+            "Pangolin AI Gateway keys cannot authorize a Taiga HTTP resource; "
+            "create a Share Link token for the Taiga resource"
+        )
+    parts = value.split(".")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError("Pangolin Share Link token must have the form ID.token")
+    return parts[0], parts[1]
+
+
 # Load .env file from project root
 load_dotenv(dotenv_path=ENV_FILE_PATH)
 
@@ -46,6 +60,11 @@ class TaigaSettings(BaseSettings):
         alias="PANGOLIN_ACCESS_TOKEN",
         description="Pangolin resource access token secret",
     )
+    pangolin_resource_token: Optional[SecretStr] = Field(
+        default=None,
+        alias="PANGOLIN_RESOURCE_TOKEN",
+        description="Combined Pangolin Share Link token (ID.token)",
+    )
 
     class Config:
         env_file = str(ENV_FILE_PATH)
@@ -68,6 +87,9 @@ class TaigaSettings(BaseSettings):
 
     def get_pangolin_credentials(self) -> Optional[tuple[str, str]]:
         """Return the resource token pair, rejecting incomplete configuration."""
+        if self.pangolin_resource_token:
+            combined = self.pangolin_resource_token.get_secret_value()
+            return split_pangolin_resource_token(combined)
         token_id = (
             self.pangolin_access_token_id.get_secret_value()
             if self.pangolin_access_token_id
@@ -76,6 +98,8 @@ class TaigaSettings(BaseSettings):
         token = (
             self.pangolin_access_token.get_secret_value() if self.pangolin_access_token else None
         )
+        if token and not token_id and ("." in token or token.startswith("pangolin-key-")):
+            return split_pangolin_resource_token(token)
         if bool(token_id) != bool(token):
             raise ValueError("Both Pangolin access token variables are required")
         return (token_id, token) if token_id and token else None

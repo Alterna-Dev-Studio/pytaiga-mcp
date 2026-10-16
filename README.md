@@ -249,6 +249,7 @@ The bridge can be configured through environment variables or a `.env` file:
 | `TAIGA_API_URL` | Base URL for the Taiga API | http://localhost:9000 |
 | `TAIGA_USERNAME` | Taiga username for auto-authentication | (none) |
 | `TAIGA_PASSWORD` | Taiga password for auto-authentication | (none) |
+| `PANGOLIN_RESOURCE_TOKEN` | Pangolin Share Link token in `ID.token` form | (none) |
 | `PANGOLIN_ACCESS_TOKEN_ID` | Pangolin resource access token ID | (none) |
 | `PANGOLIN_ACCESS_TOKEN` | Pangolin resource access token secret | (none) |
 | `TAIGA_TRANSPORT` | Transport mode (stdio, sse, or streamable-http) | stdio |
@@ -268,25 +269,31 @@ LOG_LEVEL=INFO
 
 ### Taiga behind Pangolin
 
-If Pangolin protects your Taiga API as a public resource, create a resource access
-token in the Pangolin dashboard and set both `PANGOLIN_ACCESS_TOKEN_ID` and
-`PANGOLIN_ACCESS_TOKEN`. The bridge adds Pangolin's two headers to the HTTP session
-used for Taiga login and subsequent API requests. Your Taiga username and password
-are still required for Taiga authentication.
+If Pangolin protects your Taiga API as a public resource, go to Pangolin
+Settings → Share Links, create a Share Link for the Taiga resource, and copy
+its `ID.token` value from the Usage Examples tab.
+Set `PANGOLIN_RESOURCE_TOKEN` to that value. The bridge splits it into Pangolin's
+two HTTP headers for Taiga login and subsequent API requests. The separate
+`PANGOLIN_ACCESS_TOKEN_ID` and `PANGOLIN_ACCESS_TOKEN` variables remain supported.
+For existing setups, a combined `ID.token` value in `PANGOLIN_ACCESS_TOKEN`
+also works without a separate ID.
+Your Taiga username and password are still required for Taiga authentication.
+An organization Settings → API Keys key is for Pangolin's management API, and
+a `pangolin-key-…` key is for Pangolin's AI Gateway. Neither grants access to
+a protected Taiga HTTP resource.
 
-To open the Pangolin dashboard and save the token pair in your local, ignored `.env`:
+To open the Pangolin dashboard and save the Share Link token in your local, ignored `.env`:
 
 ```bash
 uv run mcp-taiga-pangolin-setup --dashboard-url https://connect.alternadevstudio.com
 ```
 
-Run this command in an interactive terminal. It asks for the token ID and secret
-after you sign in and create the token. In a non-interactive shell, provide the ID
-as an argument and pipe the secret on standard input:
+Run this command in an interactive terminal. It asks for the single `ID.token`
+value after you sign in and create the Share Link. In a non-interactive shell,
+pipe that value on standard input:
 
 ```bash
-printf '%s\n' "$PANGOLIN_ACCESS_TOKEN" | uv run mcp-taiga-pangolin-setup \
-  --token-id "$PANGOLIN_ACCESS_TOKEN_ID" --token-stdin
+printf '%s\n' "$PANGOLIN_RESOURCE_TOKEN" | uv run mcp-taiga-pangolin-setup --token-stdin
 ```
 
 It does not obtain a token from browser login automatically. Restart the MCP server
