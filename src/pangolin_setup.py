@@ -33,7 +33,8 @@ def main() -> None:
         )
 
     print("Sign in to Pangolin, select View as Admin, then Settings > Share Links.")
-    print("Create a Share Link for the Taiga public resource and copy its ID.token value.")
+    print("Search the resource picker for the Taiga hostname, then create a Share Link.")
+    print("Copy the ID.token value from its Usage Examples.")
     print(f"Dashboard: {args.dashboard_url}")
     if args.token_stdin:
         value = sys.stdin.readline().strip()
