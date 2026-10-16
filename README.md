@@ -280,7 +280,15 @@ To open the Pangolin dashboard and save the token pair in your local, ignored `.
 uv run mcp-taiga-pangolin-setup --dashboard-url https://connect.alternadevstudio.com
 ```
 
-The command asks for the token ID and secret after you sign in and create the token.
+Run this command in an interactive terminal. It asks for the token ID and secret
+after you sign in and create the token. In a non-interactive shell, provide the ID
+as an argument and pipe the secret on standard input:
+
+```bash
+printf '%s\n' "$PANGOLIN_ACCESS_TOKEN" | uv run mcp-taiga-pangolin-setup \
+  --token-id "$PANGOLIN_ACCESS_TOKEN_ID" --token-stdin
+```
+
 It does not obtain a token from browser login automatically. Restart the MCP server
 after setup. For Docker, pass both variables into the container as environment
 variables. Scope the token to the Taiga resource and set an appropriate expiry.
