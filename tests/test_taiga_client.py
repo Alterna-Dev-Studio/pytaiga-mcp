@@ -3,11 +3,14 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from pytaigaclient.exceptions import TaigaException
 
+from src.config import TaigaSettings
 from src.taiga_client import (
     TaigaClientWrapper,
     _CompatTaigaClient,
+    _PangolinSession,
     resolve_user_id,
     safe_lower,
 )
@@ -92,6 +95,14 @@ class TestBuggyTasksMethodsNowWork:
 class TestTaigaClientWrapperLogin:
     """Cover the auth path: empty-host guard, success, and the two failure modes."""
 
+    @pytest.fixture(autouse=True)
+    def _without_local_pangolin_config(self):
+        with (
+            patch.object(TaigaSettings, "get_pangolin_credentials", return_value=None),
+            patch.object(TaigaSettings, "get_pangolin_share_link", return_value=None),
+        ):
+            yield
+
     def test_init_rejects_empty_host(self):
         with pytest.raises(ValueError, match="host URL cannot be empty"):
             TaigaClientWrapper(host="")
@@ -122,6 +133,164 @@ class TestTaigaClientWrapperLogin:
             with pytest.raises(TaigaException, match="Unexpected login error"):
                 wrapper.login(username="u", password="p")
         assert wrapper.api is None
+
+    def test_pangolin_headers_survive_login_and_api_request(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        with patch.object(TaigaSettings, "get_pangolin_credentials", return_value=("id", "secret")):
+            with patch.object(_PangolinSession, "request") as request:
+                auth_response = MagicMock(ok=True, status_code=200)
+                auth_response.json.return_value = {"auth_token": "taiga"}
+                api_response = MagicMock(ok=True, status_code=200)
+                api_response.json.return_value = {"projects": []}
+                request.side_effect = [auth_response, api_response]
+                wrapper.login("u", "p")
+                wrapper.api.get("/projects")
+        assert request.call_count == 2
+        assert request.call_args_list[0].kwargs["headers"]["P-Access-Token"] == "secret"
+        assert request.call_args_list[1].kwargs["headers"]["P-Access-Token"] == "secret"
+        assert request.call_args_list[1].kwargs["headers"]["Authorization"] == "Bearer taiga"
+        assert wrapper.api.session.headers["P-Access-Token-Id"] == "id"
+        assert wrapper.api.session.headers["P-Access-Token"] == "secret"
+
+    def test_pangolin_headers_are_recreated_on_login(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        with patch.object(TaigaSettings, "get_pangolin_credentials", return_value=("id", "secret")):
+            with patch.object(_CompatTaigaClient, "_request", return_value={"auth_token": "taiga"}):
+                wrapper.login("u", "p")
+                first_session = wrapper.api.session
+                wrapper.login("u", "p")
+        assert wrapper.api.session is not first_session
+        assert wrapper.api.session.headers["P-Access-Token"] == "secret"
+
+    def test_incomplete_pangolin_configuration_does_not_log_secret(self, caplog):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        with patch.object(
+            TaigaSettings,
+            "get_pangolin_credentials",
+            side_effect=ValueError("Both Pangolin access token variables are required"),
+        ):
+            with pytest.raises(
+                TaigaException, match="Both Pangolin access token variables are required"
+            ):
+                wrapper.login("u", "p")
+        assert "secret" not in caplog.text
+
+    def test_share_link_exchanges_for_resource_cookie_before_taiga_login(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        dashboard_response = MagicMock(ok=True)
+        dashboard_response.json.return_value = {
+            "data": {"session": "short-lived", "redirectUrl": "https://taiga.example/discover"}
+        }
+        exchange_response = MagicMock(status_code=302)
+        fake_api = MagicMock()
+        with (
+            patch.object(
+                TaigaSettings,
+                "get_pangolin_share_link",
+                return_value=("https://connect.example", "share-secret"),
+            ),
+            patch.object(requests.Session, "post", return_value=dashboard_response) as post,
+            patch.object(_PangolinSession, "get", autospec=True) as get,
+            patch("src.taiga_client._CompatTaigaClient", return_value=fake_api) as client,
+        ):
+
+            def exchange_cookie(self, *args, **kwargs):
+                self.cookies.set("resource", "cookie", domain="taiga.example")
+                return exchange_response
+
+            get.side_effect = exchange_cookie
+            assert wrapper.login("u", "p")
+        post.assert_called_once()
+        assert post.call_args.args[0] == "https://connect.example/api/v1/auth/access-token"
+        assert post.call_args.kwargs["json"] == {"accessToken": "share-secret"}
+        assert "resource_session_request_param=short-lived" in get.call_args.args[1]
+        assert get.call_args.kwargs["allow_redirects"] is False
+        assert client.call_args.kwargs["session"] is get.call_args.args[0]
+        fake_api.auth.login.assert_called_once_with(username="u", password="p")
+
+    def test_share_link_rejects_wrong_resource_without_exposing_secret(self, caplog):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        dashboard_response = MagicMock(ok=True)
+        dashboard_response.json.return_value = {
+            "data": {"session": "short-lived", "redirectUrl": "https://other.example/discover"}
+        }
+        with (
+            patch.object(
+                TaigaSettings,
+                "get_pangolin_share_link",
+                return_value=("https://connect.example", "share-secret"),
+            ),
+            patch.object(requests.Session, "post", return_value=dashboard_response),
+            patch.object(_PangolinSession, "get") as get,
+        ):
+            with pytest.raises(TaigaException, match="different Taiga resource"):
+                wrapper.login("u", "p")
+        get.assert_not_called()
+        assert "share-secret" not in caplog.text
+        assert "short-lived" not in caplog.text
+
+
+def test_pangolin_settings_require_both_values():
+    complete = TaigaSettings(
+        PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN="secret"
+    )
+    assert complete.get_pangolin_credentials() == ("id", "secret")
+    partial = TaigaSettings(
+        PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN_ID="id", PANGOLIN_ACCESS_TOKEN=""
+    )
+    with pytest.raises(ValueError, match="Both Pangolin"):
+        partial.get_pangolin_credentials()
+
+
+def test_pangolin_settings_accept_combined_resource_token():
+    settings = TaigaSettings(PANGOLIN_RESOURCE_TOKEN="id.secret")
+    assert settings.get_pangolin_credentials() == ("id", "secret")
+    malformed = TaigaSettings(PANGOLIN_RESOURCE_TOKEN="secret")
+    with pytest.raises(ValueError, match="ID.token"):
+        malformed.get_pangolin_credentials()
+
+
+def test_pangolin_settings_accept_share_link_url():
+    settings = TaigaSettings(
+        TAIGA_API_URL="https://taiga.example",
+        PANGOLIN_RESOURCE_TOKEN="https://taiga.example/?p_token=id.secret",
+    )
+    assert settings.get_pangolin_credentials() == ("id", "secret")
+
+
+def test_pangolin_settings_accept_dashboard_share_link():
+    settings = TaigaSettings(
+        TAIGA_API_URL="https://taiga.example",
+        PANGOLIN_RESOURCE_TOKEN="https://connect.example/s/share-secret",
+    )
+    assert settings.get_pangolin_share_link() == ("https://connect.example", "share-secret")
+    assert settings.get_pangolin_credentials() is None
+
+
+def test_pangolin_settings_accept_combined_token_in_legacy_variable():
+    settings = TaigaSettings(PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN="id.secret")
+    assert settings.get_pangolin_credentials() == ("id", "secret")
+
+
+def test_pangolin_settings_reject_ai_gateway_key():
+    settings = TaigaSettings(
+        PANGOLIN_RESOURCE_TOKEN="", PANGOLIN_ACCESS_TOKEN="pangolin-key-id.secret"
+    )
+    with pytest.raises(ValueError, match="AI Gateway keys"):
+        settings.get_pangolin_credentials()
+
+
+def test_pangolin_session_strips_credentials_on_cross_origin_redirect():
+    session = _PangolinSession()
+    original = requests.Request("GET", "https://taiga.example/api/v1/projects").prepare()
+    redirected = requests.Request("GET", "https://other.example/projects").prepare()
+    redirected.headers["P-Access-Token-Id"] = "id"
+    redirected.headers["P-Access-Token"] = "secret"
+    response = requests.Response()
+    response.request = original
+    session.rebuild_auth(redirected, response)
+    assert "P-Access-Token-Id" not in redirected.headers
+    assert "P-Access-Token" not in redirected.headers
 
 
 class TestSafeLower:

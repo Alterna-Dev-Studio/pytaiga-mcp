@@ -812,7 +812,7 @@ cli = [
 
 [[package]]
 name = "mcp-taiga-bridge"
-version = "2.1.5"
+version = "2.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
@@ -820,6 +820,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pytaigaclient" },
     { name = "python-dotenv" },
+    { name = "requests" },
 ]
 
 [package.optional-dependencies]
@@ -849,6 +850,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "python-dotenv", specifier = ">=0.15.0" },
+    { name = "requests", specifier = ">=2.32" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.3" },
 ]
 provides-extras = ["dev"]
