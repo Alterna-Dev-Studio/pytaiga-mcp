@@ -269,8 +269,9 @@ LOG_LEVEL=INFO
 
 ### Taiga behind Pangolin
 
-If Pangolin protects your Taiga API as a public resource, go to Pangolin
-Settings → Share Links, create a Share Link for the Taiga resource, and copy
+If Pangolin protects your Taiga API as a public resource, select **View as Admin**
+in Pangolin, then go to **Settings → Share Links**. Create a Share Link for the
+Taiga resource and copy
 its `ID.token` value from the Usage Examples tab.
 Set `PANGOLIN_RESOURCE_TOKEN` to that value. The bridge splits it into Pangolin's
 two HTTP headers for Taiga login and subsequent API requests. The separate

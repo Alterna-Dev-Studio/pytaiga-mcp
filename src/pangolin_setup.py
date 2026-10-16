@@ -32,7 +32,8 @@ def main() -> None:
             "or use --token-stdin and pipe the combined ID.token value on stdin"
         )
 
-    print("Sign in to Pangolin and create an access token for the Taiga public resource.")
+    print("Sign in to Pangolin, select View as Admin, then Settings > Share Links.")
+    print("Create a Share Link for the Taiga public resource and copy its ID.token value.")
     print(f"Dashboard: {args.dashboard_url}")
     if args.token_stdin:
         value = sys.stdin.readline().strip()
