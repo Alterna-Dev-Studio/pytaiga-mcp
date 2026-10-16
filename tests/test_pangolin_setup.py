@@ -59,6 +59,29 @@ def test_noninteractive_setup_reads_combined_token_from_stdin(tmp_path, monkeypa
     open_browser.assert_not_called()
 
 
+def test_setup_extracts_token_from_share_link(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(pangolin_setup, "ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(pangolin_setup.settings, "host", "https://taiga.example")
+    monkeypatch.setattr(sys, "argv", ["mcp-taiga-pangolin-setup", "--token-stdin"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("https://taiga.example/?p_token=id.secret\n"))
+    pangolin_setup.main()
+    assert dotenv_values(env_file)["PANGOLIN_RESOURCE_TOKEN"] == "id.secret"
+
+
+def test_setup_rejects_link_for_different_resource(tmp_path, monkeypatch, capsys):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(pangolin_setup, "ENV_FILE_PATH", env_file)
+    monkeypatch.setattr(pangolin_setup.settings, "host", "https://taiga.example")
+    monkeypatch.setattr(sys, "argv", ["mcp-taiga-pangolin-setup", "--token-stdin"])
+    monkeypatch.setattr(sys, "stdin", io.StringIO("https://different.example/?p_token=id.secret\n"))
+    with pytest.raises(SystemExit) as error:
+        pangolin_setup.main()
+    assert error.value.code == 2
+    assert "hostname must match" in capsys.readouterr().err
+    assert not env_file.exists()
+
+
 def test_interactive_eof_exits_without_traceback_or_write(tmp_path, monkeypatch, capsys):
     env_file = tmp_path / ".env"
     monkeypatch.setattr(pangolin_setup, "ENV_FILE_PATH", env_file)

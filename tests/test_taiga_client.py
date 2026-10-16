@@ -189,6 +189,14 @@ def test_pangolin_settings_accept_combined_resource_token():
         malformed.get_pangolin_credentials()
 
 
+def test_pangolin_settings_accept_share_link_url():
+    settings = TaigaSettings(
+        TAIGA_API_URL="https://taiga.example",
+        PANGOLIN_RESOURCE_TOKEN="https://taiga.example/?p_token=id.secret",
+    )
+    assert settings.get_pangolin_credentials() == ("id", "secret")
+
+
 def test_pangolin_settings_accept_combined_token_in_legacy_variable():
     settings = TaigaSettings(PANGOLIN_ACCESS_TOKEN="id.secret")
     assert settings.get_pangolin_credentials() == ("id", "secret")

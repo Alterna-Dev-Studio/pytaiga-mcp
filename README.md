@@ -271,11 +271,12 @@ LOG_LEVEL=INFO
 
 If Pangolin protects your Taiga API as a public resource, select **View as Admin**
 in Pangolin, then go to **Settings → Share Links**. Create a Share Link for the
-Taiga resource and copy its `ID.token` value from the Usage Examples tab. The
+Taiga resource and copy the link URL (or its `p_token=ID.token` value). The
 resource picker initially shows only 10 entries; search by the Taiga hostname.
 If Taiga is absent after searching, check **Settings → Resources** in the same
 organization and confirm that the Taiga hostname is registered there.
-Set `PANGOLIN_RESOURCE_TOKEN` to that value. The bridge splits it into Pangolin's
+Set `PANGOLIN_RESOURCE_TOKEN` to the URL or the `ID.token` value. The bridge
+checks that a pasted URL matches `TAIGA_API_URL` and splits the token into Pangolin's
 two HTTP headers for Taiga login and subsequent API requests. The separate
 `PANGOLIN_ACCESS_TOKEN_ID` and `PANGOLIN_ACCESS_TOKEN` variables remain supported.
 For existing setups, a combined `ID.token` value in `PANGOLIN_ACCESS_TOKEN`
@@ -291,16 +292,15 @@ To open the Pangolin dashboard and save the Share Link token in your local, igno
 uv run mcp-taiga-pangolin-setup --dashboard-url https://connect.alternadevstudio.com
 ```
 
-Run this command in an interactive terminal. It asks for the single `ID.token`
-value after you sign in and create the Share Link. In a non-interactive shell,
-pipe that value on standard input:
+Run this command in an interactive terminal. Paste the complete Share Link URL
+when prompted. In a non-interactive shell, pipe the link on standard input:
 
 ```bash
-printf '%s\n' "$PANGOLIN_RESOURCE_TOKEN" | uv run mcp-taiga-pangolin-setup --token-stdin
+printf '%s\n' "$PANGOLIN_SHARE_LINK" | uv run mcp-taiga-pangolin-setup --token-stdin
 ```
 
 It does not obtain a token from browser login automatically. Restart the MCP server
-after setup. For Docker, pass both variables into the container as environment
+after setup. For Docker, pass `PANGOLIN_RESOURCE_TOKEN` into the container as an environment
 variables. Scope the token to the Taiga resource and set an appropriate expiry.
 
 **Security Note**: Credentials are protected and will never appear in logs, error messages, or stack traces. When `TAIGA_USERNAME` and `TAIGA_PASSWORD` are configured, the server auto-authenticates on startup - no manual login required.

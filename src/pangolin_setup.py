@@ -8,7 +8,7 @@ import webbrowser
 
 from dotenv import dotenv_values, set_key, unset_key
 
-from src.config import ENV_FILE_PATH, split_pangolin_resource_token
+from src.config import ENV_FILE_PATH, settings, split_pangolin_resource_token
 
 
 def main() -> None:
@@ -29,12 +29,12 @@ def main() -> None:
     if not args.token_stdin and not sys.stdin.isatty():
         parser.error(
             "interactive input is unavailable. Run this command in a terminal, "
-            "or use --token-stdin and pipe the combined ID.token value on stdin"
+            "or use --token-stdin and pipe the Share Link URL on stdin"
         )
 
     print("Sign in to Pangolin, select View as Admin, then Settings > Share Links.")
     print("Search the resource picker for the Taiga hostname, then create a Share Link.")
-    print("Copy the ID.token value from its Usage Examples.")
+    print("Copy the Share Link URL or its ID.token value.")
     print(f"Dashboard: {args.dashboard_url}")
     if args.token_stdin:
         value = sys.stdin.readline().strip()
@@ -42,17 +42,17 @@ def main() -> None:
     else:
         webbrowser.open(args.dashboard_url)
         try:
-            combined = getpass.getpass("Pangolin Share Link token (ID.token): ").strip()
+            combined = getpass.getpass("Pangolin Share Link URL or ID.token: ").strip()
         except (EOFError, KeyboardInterrupt):
             parser.exit(2, "\nSetup cancelled; .env was not changed.\n")
     try:
-        split_pangolin_resource_token(combined)
+        token_id, token = split_pangolin_resource_token(combined, settings.host)
     except ValueError as error:
         parser.error(f"{error}; .env was not changed")
 
     ENV_FILE_PATH.touch(mode=0o600, exist_ok=True)
     os.chmod(ENV_FILE_PATH, 0o600)
-    set_key(str(ENV_FILE_PATH), "PANGOLIN_RESOURCE_TOKEN", combined)
+    set_key(str(ENV_FILE_PATH), "PANGOLIN_RESOURCE_TOKEN", f"{token_id}.{token}")
     existing = dotenv_values(ENV_FILE_PATH)
     for key in ("PANGOLIN_ACCESS_TOKEN_ID", "PANGOLIN_ACCESS_TOKEN"):
         if key in existing:

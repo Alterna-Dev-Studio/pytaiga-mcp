@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Optional
+from urllib.parse import parse_qs, urlsplit
 
 from dotenv import load_dotenv
 from pydantic import Field, SecretStr
@@ -12,8 +13,18 @@ PROJECT_ROOT = Path(__file__).parent.parent
 ENV_FILE_PATH = PROJECT_ROOT / ".env"
 
 
-def split_pangolin_resource_token(value: str) -> tuple[str, str]:
-    """Parse a Share Link credential without accepting AI Gateway keys."""
+def split_pangolin_resource_token(
+    value: str, expected_host: Optional[str] = None
+) -> tuple[str, str]:
+    """Parse a Share Link URL or ID.token without accepting AI Gateway keys."""
+    if value.startswith(("https://", "http://")):
+        link = urlsplit(value)
+        if expected_host and link.hostname != urlsplit(expected_host).hostname:
+            raise ValueError("Pangolin Share Link hostname must match TAIGA_API_URL")
+        tokens = parse_qs(link.query, keep_blank_values=True).get("p_token", [])
+        if len(tokens) != 1:
+            raise ValueError("Pangolin Share Link URL must contain one p_token parameter")
+        value = tokens[0]
     if value.startswith("pangolin-key-"):
         raise ValueError(
             "Pangolin AI Gateway keys cannot authorize a Taiga HTTP resource; "
@@ -89,7 +100,7 @@ class TaigaSettings(BaseSettings):
         """Return the resource token pair, rejecting incomplete configuration."""
         if self.pangolin_resource_token:
             combined = self.pangolin_resource_token.get_secret_value()
-            return split_pangolin_resource_token(combined)
+            return split_pangolin_resource_token(combined, self.host)
         token_id = (
             self.pangolin_access_token_id.get_secret_value()
             if self.pangolin_access_token_id
@@ -99,7 +110,7 @@ class TaigaSettings(BaseSettings):
             self.pangolin_access_token.get_secret_value() if self.pangolin_access_token else None
         )
         if token and not token_id and ("." in token or token.startswith("pangolin-key-")):
-            return split_pangolin_resource_token(token)
+            return split_pangolin_resource_token(token, self.host)
         if bool(token_id) != bool(token):
             raise ValueError("Both Pangolin access token variables are required")
         return (token_id, token) if token_id and token else None
