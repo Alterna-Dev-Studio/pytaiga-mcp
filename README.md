@@ -249,13 +249,13 @@ The bridge can be configured through environment variables or a `.env` file:
 | `TAIGA_API_URL` | Base URL for the Taiga API | http://localhost:9000 |
 | `TAIGA_USERNAME` | Taiga username for auto-authentication | (none) |
 | `TAIGA_PASSWORD` | Taiga password for auto-authentication | (none) |
-| `PANGOLIN_DASHBOARD_URL` | Pangolin dashboard origin for a user session | (none) |
-| `PANGOLIN_SESSION_TOKEN` | Pangolin user session token from `pangolin-login` | (none) |
-| `PANGOLIN_SESSION_COOKIE` | Pangolin user session cookie name | `p_session_token` |
-| `PANGOLIN_RESOURCE_TOKEN` | Pangolin `/s/…` Share Link URL or `ID.token` | (none) |
-| `PANGOLIN_SESSION_REQUEST_PARAM` | Pangolin resource session request parameter | `resource_session_request_param` |
-| `PANGOLIN_ACCESS_TOKEN_ID` | Pangolin resource access token ID | (none) |
-| `PANGOLIN_ACCESS_TOKEN` | Pangolin resource access token secret | (none) |
+| `PANGOLIN_DASHBOARD_URL` | Pangolin host that issued your session token (`https://host`, no path) | (none) |
+| `PANGOLIN_SESSION_TOKEN` | Your Pangolin session token, from the dev-env `pangolin-login` script | (none) |
+| `PANGOLIN_RESOURCE_TOKEN` | Pangolin Share Link for the Taiga resource: `https://…/s/…` URL, `?p_token=` URL, or bare `ID.token` | (none) |
+| `PANGOLIN_SESSION_COOKIE` | Pangolin session cookie name. Leave default unless Pangolin's `session_cookie_name` is customised | `p_session_token` |
+| `PANGOLIN_SESSION_REQUEST_PARAM` | Pangolin resource-session query parameter. Leave default unless customised | `resource_session_request_param` |
+| `PANGOLIN_ACCESS_TOKEN_ID` | Legacy: ID half of a Share Link `ID.token`. Ignored when `PANGOLIN_RESOURCE_TOKEN` is set | (none) |
+| `PANGOLIN_ACCESS_TOKEN` | Legacy: secret half of a Share Link `ID.token` (a combined `ID.token` also works here) | (none) |
 | `TAIGA_TRANSPORT` | Transport mode (stdio, sse, or streamable-http) | stdio |
 | `MCP_HOST` | Bind address for SSE/HTTP transport. Use `0.0.0.0` for Docker. | 127.0.0.1 |
 | `MCP_PORT` | Listen port for SSE/HTTP transport | 8000 |
@@ -273,55 +273,74 @@ LOG_LEVEL=INFO
 
 ### Taiga behind Pangolin
 
-If Pangolin protects your Taiga API, the simplest option is your own Pangolin
-login. Run the dev-env `pangolin-login` script (a device code you confirm in the
-browser with your own account, including 2FA or an external identity provider)
-and store its token as `PANGOLIN_SESSION_TOKEN` together with
-`PANGOLIN_DASHBOARD_URL`, the dashboard origin that issued it. On login the
-bridge requests the Taiga root like a browser; when Pangolin redirects to the
-configured dashboard, the bridge presents the session token there, follows the
-resulting one-shot request back to the Taiga origin, and keeps the resource
-cookie Pangolin sets for all Taiga requests. A plain `200` instead of a
-redirect (for example on a LAN with split DNS) means Taiga is not proxied from
-that network, and the bridge logs in directly. If the dashboard shows its own
-page instead of redirecting, the error says `Pangolin session expired or has no
-access to this resource; run pangolin-login again`. The token is only ever sent
-to `PANGOLIN_DASHBOARD_URL`; a redirect to any other host is rejected. Set
-`PANGOLIN_SESSION_COOKIE` only if your Pangolin uses a non-default
-`session_cookie_name`. A session token takes precedence over the Share Link
-settings below.
+[Pangolin](https://github.com/fosrl/pangolin) is a reverse proxy that puts a
+login page in front of the services it protects. If `TAIGA_API_URL` is behind
+Pangolin, the bridge needs a Pangolin credential before it can log in to Taiga.
+`TAIGA_USERNAME` and `TAIGA_PASSWORD` are still required.
 
-Alternatively, an admin can create a Share Link for a service account. Select **View as Admin**
-in Pangolin, then go to **Settings → Share Links**. Create a Share Link for the
-Taiga resource and copy the link URL (or its `p_token=ID.token` value). The
-resource picker initially shows only 10 entries; search by the Taiga hostname.
-If Taiga is absent after searching, check **Settings → Resources** in the same
-organization and confirm that the Taiga hostname is registered there.
-Set `PANGOLIN_RESOURCE_TOKEN` to the URL or the `ID.token` value. A dashboard
-`https://…/s/…` link is exchanged for a resource session cookie before Taiga
-login. The dashboard hostname can differ from `TAIGA_API_URL`; the bridge checks
-that Pangolin redirects to the configured Taiga origin. For a resource URL with
-`p_token=ID.token`, the bridge checks the resource hostname and sends Pangolin's
-two HTTP headers on Taiga requests. The separate
-`PANGOLIN_ACCESS_TOKEN_ID` and `PANGOLIN_ACCESS_TOKEN` variables remain supported.
-For existing setups, a combined `ID.token` value in `PANGOLIN_ACCESS_TOKEN`
-also works without a separate ID.
-Your Taiga username and password are still required for Taiga authentication.
-An organization Settings → API Keys key is for Pangolin's management API, and
-a `pangolin-key-…` key is for Pangolin's AI Gateway. Neither grants access to
-a protected Taiga HTTP resource.
+Pick one of two credentials. If both are set, the session token wins.
 
-Provide `PANGOLIN_RESOURCE_TOKEN` through whatever supplies the server's
-environment: the local, ignored `.env` file for a bare `uv run`, a container
-environment variable for Docker, or your launcher's secret store. The server
-does not obtain a token itself. If you launch it from a `dev-env-template`
-checkout, its `scripts/pangolin-token` script collects and validates the Share
-Link and `scripts/pangolin-configure SCOPE` stores it in the encrypted scope
-that `scripts/taiga-mcp` reads; see that repository's README. Restart the MCP
-server after changing the token. Pangolin may use a different resource session
-request parameter; set `PANGOLIN_SESSION_REQUEST_PARAM` to match your Pangolin
-configuration if needed. Scope the token to the Taiga resource and set an
-appropriate expiry.
+**Option 1: your own Pangolin login (recommended)**
+
+Run the dev-env `pangolin-login` script. It shows a device code, you confirm it
+in your browser with your own Pangolin account (2FA or SSO included), and it
+prints a session token. Set:
+
+```
+PANGOLIN_DASHBOARD_URL=https://pangolin.example.com   # the Pangolin host; https, no path
+PANGOLIN_SESSION_TOKEN=<token from pangolin-login>
+```
+
+The session lasts 30 days from last use and ends when you log out of Pangolin
+or an admin revokes it. The token is only ever sent to `PANGOLIN_DASHBOARD_URL`.
+
+**Option 2: a Share Link (service account)**
+
+A Pangolin admin creates one under **View as Admin → Settings → Share Links**:
+pick the Taiga resource (search by hostname), set an expiry, copy the link. Set:
+
+```
+PANGOLIN_RESOURCE_TOKEN=https://pangolin.example.com/s/<secret>
+```
+
+A Taiga URL with `?p_token=ID.token`, or the bare `ID.token`, is also accepted.
+Pangolin API keys and `pangolin-key-…` AI Gateway keys do not work here.
+
+**Where the values live**
+
+The server reads them from its environment like every other setting: `.env`
+for `uv run`, container variables for Docker. With the `dev-env-template`
+launcher, `scripts/pangolin-login` (session token) or `scripts/pangolin-token`
+(Share Link) print the value and `scripts/pangolin-configure SCOPE` stores it
+in the encrypted scope that `scripts/taiga-mcp` reads. Restart the server after
+changing any of them.
+
+**What you will see**
+
+Failures appear in the server log as `Unexpected login error: …`.
+
+- On a LAN where Taiga's hostname resolves directly (split DNS), the log says
+  `Taiga is not behind Pangolin from this network; skipping` and the bridge
+  logs in to Taiga directly. This is normal.
+- `Pangolin session expired or has no access to this resource; run
+  pangolin-login again`: run `pangolin-login` for a new token, or ask an admin
+  to grant your user the Taiga resource.
+- `Pangolin did not redirect to the configured dashboard`:
+  `PANGOLIN_DASHBOARD_URL` is not the host Taiga redirects to.
+- `Pangolin rejected the Share Link`: the link is expired, revoked or mistyped.
+- `Pangolin Share Link hostname must match TAIGA_API_URL` or `… points to a
+  different Taiga resource`: the link is for another resource.
+- `PANGOLIN_DASHBOARD_URL is required with PANGOLIN_SESSION_TOKEN` or `Both
+  Pangolin access token variables are required`: one half of a pair is missing.
+
+**Rarely needed**
+
+- `PANGOLIN_SESSION_COOKIE` (default `p_session_token`): only if your
+  Pangolin's `session_cookie_name` is customised.
+- `PANGOLIN_SESSION_REQUEST_PARAM` (default `resource_session_request_param`):
+  only if your Pangolin's resource session request parameter is customised.
+- `PANGOLIN_ACCESS_TOKEN_ID` + `PANGOLIN_ACCESS_TOKEN`: the older two-variable
+  form of a Share Link `ID.token`. Ignored when `PANGOLIN_RESOURCE_TOKEN` is set.
 
 **Security Note**: Credentials are protected and will never appear in logs, error messages, or stack traces. When `TAIGA_USERNAME` and `TAIGA_PASSWORD` are configured, the server auto-authenticates on startup - no manual login required.
 
