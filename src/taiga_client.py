@@ -1,9 +1,15 @@
 # taiga_client.py
+import html
 import logging
+import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
+import requests
 from pytaigaclient import TaigaClient
 from pytaigaclient.exceptions import TaigaException
+
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +35,136 @@ _RESOURCE_ENDPOINTS = {
 }
 
 _NO_PAGINATION_HEADERS = {"x-disable-pagination": "True"}
+
+
+class _PangolinSession(requests.Session):
+    """Keep resource credentials on the Taiga origin during redirects."""
+
+    def rebuild_auth(
+        self, prepared_request: requests.PreparedRequest, response: requests.Response
+    ) -> None:
+        if self.should_strip_auth(response.request.url, prepared_request.url):
+            prepared_request.headers.pop("P-Access-Token-Id", None)
+            prepared_request.headers.pop("P-Access-Token", None)
+        super().rebuild_auth(prepared_request, response)
+
+
+def _start_pangolin_share_session(
+    session: _PangolinSession,
+    dashboard: str,
+    secret: str,
+    taiga_host: str,
+    request_param: str,
+) -> None:
+    """Exchange a dashboard Share Link for a cookie on the Taiga resource."""
+    if not request_param or not request_param.isidentifier():
+        raise ValueError("Invalid Pangolin session request parameter")
+    try:
+        with requests.Session() as dashboard_session:
+            response = dashboard_session.post(
+                f"{dashboard}/api/v1/auth/access-token",
+                json={"accessToken": secret},
+                headers={"X-CSRF-Token": "x-csrf-protection"},
+                allow_redirects=False,
+                timeout=10,
+            )
+        if not response.ok:
+            raise ValueError("Pangolin rejected the Share Link")
+        data = response.json().get("data", {})
+        redirect_url = data.get("redirectUrl")
+        request_token = data.get("session")
+        if not isinstance(redirect_url, str) or not isinstance(request_token, str):
+            raise ValueError("Pangolin returned an invalid Share Link response")
+        resource = urlsplit(redirect_url)
+        if not _same_origin(resource, taiga_host):
+            raise ValueError("Pangolin Share Link points to a different Taiga resource")
+        query = parse_qsl(resource.query, keep_blank_values=True)
+        query.append((request_param, request_token))
+        _exchange_pangolin_request_url(
+            session, urlunsplit(resource._replace(query=urlencode(query)))
+        )
+    except requests.RequestException:
+        raise ValueError("Pangolin Share Link authentication request failed") from None
+
+
+def _same_origin(url: SplitResult, origin: str) -> bool:
+    expected = urlsplit(origin)
+    return (
+        url.scheme == expected.scheme
+        and url.netloc == expected.netloc
+        and not url.username
+        and not url.password
+    )
+
+
+def _exchange_pangolin_request_url(session: _PangolinSession, exchange_url: str) -> None:
+    """Visit a Taiga URL carrying a one-shot request token so Badger sets its cookie."""
+    exchange = session.get(exchange_url, allow_redirects=False, timeout=10)
+    if exchange.status_code not in _REDIRECT_CODES or not session.cookies:
+        raise ValueError("Pangolin did not establish a Taiga resource session")
+
+
+_REDIRECT_CODES = (301, 302, 303, 307, 308)
+_BROWSER_HEADERS = {"Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0"}
+
+
+def _start_pangolin_user_session(
+    session: _PangolinSession,
+    dashboard: str,
+    token: str,
+    cookie_name: str,
+    taiga_host: str,
+) -> None:
+    """Turn a Pangolin user session into a resource session on the Taiga origin."""
+    try:
+        with requests.Session() as probe:
+            response = probe.get(
+                f"{taiga_host}/", headers=_BROWSER_HEADERS, allow_redirects=False, timeout=10
+            )
+        if response.status_code not in _REDIRECT_CODES:
+            if response.ok:
+                logger.info("Taiga is not behind Pangolin from this network; skipping")
+                return
+            raise ValueError("Pangolin did not redirect to the configured dashboard")
+        portal = urlsplit(response.headers.get("Location", ""))
+        if not _same_origin(portal, dashboard) or not portal.path.startswith("/auth/resource/"):
+            raise ValueError("Pangolin did not redirect to the configured dashboard")
+        with requests.Session() as portal_session:
+            portal_session.cookies.set(cookie_name, token, domain=portal.hostname)
+            response = portal_session.get(
+                urlunsplit(portal._replace(query=urlencode({"redirect": f"{taiga_host}/"}))),
+                headers=_BROWSER_HEADERS,
+                allow_redirects=False,
+                timeout=10,
+            )
+        if response.status_code in _REDIRECT_CODES:
+            location = response.headers.get("Location", "")
+        elif response.ok:
+            # The Next.js portal streams its page, so the redirect usually arrives as a
+            # NEXT_REDIRECT marker inside a 200 body rather than as an HTTP 307.
+            location = _next_redirect_target(response.text)
+            if not location:
+                raise ValueError(
+                    "Pangolin session expired or has no access to this resource; "
+                    "run pangolin-login again"
+                )
+        else:
+            raise ValueError("Pangolin resource authentication failed")
+        exchange = urlsplit(location)
+        if not _same_origin(exchange, taiga_host) or len(parse_qsl(exchange.query)) != 1:
+            raise ValueError("Pangolin did not return a Taiga resource session request")
+        _exchange_pangolin_request_url(session, urlunsplit(exchange))
+    except requests.RequestException:
+        raise ValueError("Pangolin resource authentication request failed") from None
+
+
+_NEXT_REDIRECT = re.compile(r"NEXT_REDIRECT;(?:push|replace);(https://[^;\"'\\\s<]+);")
+
+
+def _next_redirect_target(body: str) -> str:
+    """Return the URL from a streamed Next.js redirect marker, or an empty string."""
+    match = _NEXT_REDIRECT.search(body)
+    return html.unescape(match.group(1)).replace("\\u0026", "&") if match else ""
 
 
 def safe_lower(value: Any) -> str:
@@ -136,7 +272,33 @@ class TaigaClientWrapper:
             # SECURITY: Don't log username to avoid credential exposure
             logger.info(f"Attempting login on {self.host}")
             # Initialize the client here (compat subclass; see _CompatTaigaClient).
-            api_instance = _CompatTaigaClient(host=self.host)
+            pangolin_session = settings.get_pangolin_session()
+            pangolin_share_link = settings.get_pangolin_share_link()
+            pangolin_credentials = settings.get_pangolin_credentials()
+            if pangolin_session or pangolin_share_link or pangolin_credentials:
+                # pytaigaclient logs complete request headers at DEBUG level.
+                logging.getLogger("pytaigaclient.client").setLevel(logging.INFO)
+                session = _PangolinSession()
+                if pangolin_session:
+                    _start_pangolin_user_session(session, *pangolin_session, self.host)
+                elif pangolin_share_link:
+                    _start_pangolin_share_session(
+                        session,
+                        *pangolin_share_link,
+                        self.host,
+                        # Launchers may export an empty value for an unset variable.
+                        settings.pangolin_session_request_param or "resource_session_request_param",
+                    )
+                else:
+                    session.headers.update(
+                        {
+                            "P-Access-Token-Id": pangolin_credentials[0],
+                            "P-Access-Token": pangolin_credentials[1],
+                        }
+                    )
+                api_instance = _CompatTaigaClient(host=self.host, session=session)
+            else:
+                api_instance = _CompatTaigaClient(host=self.host)
             # Use the auth resource's login method
             api_instance.auth.login(username=username, password=password)
             self.api = api_instance
