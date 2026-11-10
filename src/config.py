@@ -123,10 +123,60 @@ class TaigaSettings(BaseSettings):
         extra = "ignore"
         populate_by_name = True
 
+    auth_token: Optional[SecretStr] = Field(
+        default=None,
+        alias="TAIGA_AUTH_TOKEN",
+        description="Taiga token used instead of a password (from taiga-login)",
+    )
+    token_type: str = Field(
+        default="Application",
+        alias="TAIGA_TOKEN_TYPE",
+        description="Authorization scheme for TAIGA_AUTH_TOKEN: Application or Bearer",
+    )
+    oidc_issuer: Optional[str] = Field(
+        default=None,
+        alias="TAIGA_OIDC_ISSUER",
+        description="OIDC issuer that Taiga trusts, used by taiga-login's device code flow",
+    )
+    oidc_client_id: Optional[str] = Field(
+        default=None,
+        alias="TAIGA_OIDC_CLIENT_ID",
+        description="Public (native) OIDC client id for taiga-login",
+    )
+    application_id: Optional[str] = Field(
+        default=None,
+        alias="TAIGA_APPLICATION_ID",
+        description="Taiga external application id whose tokens taiga-login mints",
+    )
+
     @property
     def has_credentials(self) -> bool:
         """Check if credentials are available for auto-auth."""
-        return bool(self.username and self.password)
+        return bool(self.get_auth_token() or (self.username and self.password))
+
+    def get_auth_token(self) -> Optional[tuple[str, str]]:
+        """Return (token, type) when a Taiga token is configured; empty values count as unset."""
+        token = self.auth_token.get_secret_value() if self.auth_token else ""
+        if not token:
+            return None
+        token_type = (self.token_type or "Application").strip()
+        if token_type.lower() not in ("application", "bearer"):
+            raise ValueError("TAIGA_TOKEN_TYPE must be Application or Bearer")
+        return token, token_type.capitalize()
+
+    def get_oidc_login_settings(self) -> tuple[str, str, str]:
+        """Return (issuer, client id, application id) for taiga-login, or raise naming the gap."""
+        values = {
+            "TAIGA_OIDC_ISSUER": (self.oidc_issuer or "").strip().rstrip("/"),
+            "TAIGA_OIDC_CLIENT_ID": (self.oidc_client_id or "").strip(),
+            "TAIGA_APPLICATION_ID": (self.application_id or "").strip(),
+        }
+        missing = [name for name, value in values.items() if not value]
+        if missing:
+            raise ValueError("taiga-login needs " + ", ".join(missing))
+        if not values["TAIGA_OIDC_ISSUER"].startswith("https://"):
+            raise ValueError("TAIGA_OIDC_ISSUER must be an https:// origin")
+        return tuple(values.values())  # type: ignore[return-value]
 
     def get_username_value(self) -> Optional[str]:
         """Safely get username value."""

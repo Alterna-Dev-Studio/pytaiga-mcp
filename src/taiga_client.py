@@ -7,7 +7,7 @@ from urllib.parse import SplitResult, parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from pytaigaclient import TaigaClient
-from pytaigaclient.exceptions import TaigaException
+from pytaigaclient.exceptions import TaigaAuthenticationError, TaigaException
 
 from src.config import settings
 
@@ -263,6 +263,35 @@ class TaigaClientWrapper:
         self.api: Optional[TaigaClient] = None
         logger.info(f"TaigaClientWrapper initialized for host: {self.host}")
 
+    def _build_client(self) -> "_CompatTaigaClient":
+        """Create an unauthenticated client, going through Pangolin first when configured."""
+        pangolin_session = settings.get_pangolin_session()
+        pangolin_share_link = settings.get_pangolin_share_link()
+        pangolin_credentials = settings.get_pangolin_credentials()
+        if not (pangolin_session or pangolin_share_link or pangolin_credentials):
+            return _CompatTaigaClient(host=self.host)
+        # pytaigaclient logs complete request headers at DEBUG level.
+        logging.getLogger("pytaigaclient.client").setLevel(logging.INFO)
+        session = _PangolinSession()
+        if pangolin_session:
+            _start_pangolin_user_session(session, *pangolin_session, self.host)
+        elif pangolin_share_link:
+            _start_pangolin_share_session(
+                session,
+                *pangolin_share_link,
+                self.host,
+                # Launchers may export an empty value for an unset variable.
+                settings.pangolin_session_request_param or "resource_session_request_param",
+            )
+        else:
+            session.headers.update(
+                {
+                    "P-Access-Token-Id": pangolin_credentials[0],
+                    "P-Access-Token": pangolin_credentials[1],
+                }
+            )
+        return _CompatTaigaClient(host=self.host, session=session)
+
     def login(self, username: str, password: str) -> bool:
         """
         Authenticates with the Taiga instance using username and password.
@@ -271,34 +300,7 @@ class TaigaClientWrapper:
         try:
             # SECURITY: Don't log username to avoid credential exposure
             logger.info(f"Attempting login on {self.host}")
-            # Initialize the client here (compat subclass; see _CompatTaigaClient).
-            pangolin_session = settings.get_pangolin_session()
-            pangolin_share_link = settings.get_pangolin_share_link()
-            pangolin_credentials = settings.get_pangolin_credentials()
-            if pangolin_session or pangolin_share_link or pangolin_credentials:
-                # pytaigaclient logs complete request headers at DEBUG level.
-                logging.getLogger("pytaigaclient.client").setLevel(logging.INFO)
-                session = _PangolinSession()
-                if pangolin_session:
-                    _start_pangolin_user_session(session, *pangolin_session, self.host)
-                elif pangolin_share_link:
-                    _start_pangolin_share_session(
-                        session,
-                        *pangolin_share_link,
-                        self.host,
-                        # Launchers may export an empty value for an unset variable.
-                        settings.pangolin_session_request_param or "resource_session_request_param",
-                    )
-                else:
-                    session.headers.update(
-                        {
-                            "P-Access-Token-Id": pangolin_credentials[0],
-                            "P-Access-Token": pangolin_credentials[1],
-                        }
-                    )
-                api_instance = _CompatTaigaClient(host=self.host, session=session)
-            else:
-                api_instance = _CompatTaigaClient(host=self.host)
+            api_instance = self._build_client()
             # Use the auth resource's login method
             api_instance.auth.login(username=username, password=password)
             self.api = api_instance
@@ -316,11 +318,29 @@ class TaigaClientWrapper:
             # Wrap unexpected errors in TaigaException if needed, or re-raise
             raise TaigaException(f"Unexpected login error: {e}")
 
-    # Add method for token authentication if needed by pytaigaclient
-    # def set_token(self, token: str, token_type: str = "Bearer"):
-    #     logger.info(f"Initializing TaigaClient with token on {self.host}")
-    #     self.api = _CompatTaigaClient(host=self.host, auth_token=token, token_type=token_type)
-    #     logger.info("TaigaClient initialized with token.")
+    def login_with_token(self, token: str, token_type: str = "Application") -> bool:
+        """Authenticate with a Taiga token (an Application token from taiga-login, or a JWT)."""
+        try:
+            logger.info(f"Authenticating with a {token_type} token on {self.host}")
+            api_instance = self._build_client()
+            api_instance.update_token(token, token_type)
+            try:
+                api_instance.get("/users/me")
+            except TaigaAuthenticationError:
+                raise TaigaException(
+                    "Taiga rejected the configured token; run taiga-login again"
+                ) from None
+            self.api = api_instance
+            logger.info("Token authentication successful.")
+            return True
+        except TaigaException as e:
+            logger.error(f"Taiga token authentication failed: {e}", exc_info=False)
+            self.api = None
+            raise e
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during token login: {e}", exc_info=True)
+            self.api = None
+            raise TaigaException(f"Unexpected login error: {e}")
 
     @property
     def is_authenticated(self) -> bool:
