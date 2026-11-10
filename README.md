@@ -249,6 +249,11 @@ The bridge can be configured through environment variables or a `.env` file:
 | `TAIGA_API_URL` | Base URL for the Taiga API | http://localhost:9000 |
 | `TAIGA_USERNAME` | Taiga username for auto-authentication | (none) |
 | `TAIGA_PASSWORD` | Taiga password for auto-authentication | (none) |
+| `TAIGA_AUTH_TOKEN` | Taiga token used instead of a password, from `taiga-login` | (none) |
+| `TAIGA_TOKEN_TYPE` | `Application` (token from `taiga-login`) or `Bearer` (a Taiga JWT) | `Application` |
+| `TAIGA_OIDC_ISSUER` | Identity provider Taiga trusts, e.g. `https://login.example.com`; used only by `taiga-login` | (none) |
+| `TAIGA_OIDC_CLIENT_ID` | Public (native) OIDC client id for `taiga-login`'s device code flow | (none) |
+| `TAIGA_APPLICATION_ID` | Taiga external application id whose tokens `taiga-login` mints | (none) |
 | `PANGOLIN_DASHBOARD_URL` | Pangolin host that issued your session token (`https://host`, no path) | (none) |
 | `PANGOLIN_SESSION_TOKEN` | Your Pangolin session token, from the dev-env `pangolin-login` script | (none) |
 | `PANGOLIN_RESOURCE_TOKEN` | Pangolin Share Link for the Taiga resource: `https://…/s/…` URL, `?p_token=` URL, or bare `ID.token` | (none) |
@@ -270,6 +275,54 @@ TAIGA_PASSWORD=your_password
 TAIGA_TRANSPORT=stdio
 LOG_LEVEL=INFO
 ```
+
+### Taiga login with your identity provider
+
+If your Taiga signs users in through an OpenID Connect provider (the
+`taiga-contrib-openid-auth` plugin), you can skip `TAIGA_USERNAME` and
+`TAIGA_PASSWORD` and use a token tied to your SSO account instead.
+
+Run `mcp-taiga-login` (or the dev-env `taiga-login` wrapper). It shows a device
+code, you confirm it in your browser with your identity-provider account (2FA
+included), it signs in to Taiga with that session and prints a Taiga
+**Application token** on stdout. Set:
+
+```
+TAIGA_AUTH_TOKEN=<token from taiga-login>
+```
+
+The token does not expire. Revoke it with `mcp-taiga-login --revoke` (which also
+issues a fresh one), in Taiga under your profile's external applications, or
+by deleting it in the Django admin. `TAIGA_AUTH_TOKEN` takes precedence over a
+username and password.
+
+`mcp-taiga-login` itself needs three non-secret values, normally supplied by the
+same launcher environment as the server:
+
+```
+TAIGA_OIDC_ISSUER=https://login.example.com     # the OIDC issuer Taiga trusts
+TAIGA_OIDC_CLIENT_ID=<native app client id>     # a public client with the device code grant
+TAIGA_APPLICATION_ID=<taiga external app uuid>  # created once by a Taiga admin
+```
+
+The Taiga admin creates the external application once:
+`python manage.py shell -c "from taiga.external_apps.models import Application; print(Application.objects.create(name='pytaiga-mcp', web='https://github.com/Alterna-Dev-Studio/pytaiga-mcp', next_url='https://<taiga host>/').id)"`.
+The identity-provider admin registers a native (public) OIDC application with
+the device code grant in the same project as Taiga's own application.
+
+What you will see:
+
+- `Taiga rejected the configured token; run taiga-login again` (server log):
+  the token was revoked or deleted.
+- `taiga-login: Taiga could not match your identity-provider account to a Taiga
+  user…`: sign in to Taiga once in the browser with that account first.
+- `taiga-login: this Taiga server has no OpenID login plugin enabled`: the
+  server is not configured for SSO; use a username and password.
+- `taiga-login: the device code expired before it was confirmed`: run it again
+  and confirm within a few minutes.
+- `taiga-login needs TAIGA_OIDC_ISSUER, …`: the three values above are missing.
+
+Behind Pangolin, `taiga-login` uses the same `PANGOLIN_*` settings as the server.
 
 ### Taiga behind Pangolin
 

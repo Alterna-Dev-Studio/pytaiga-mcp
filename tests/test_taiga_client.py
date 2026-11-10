@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from pytaigaclient.exceptions import TaigaException
+from pytaigaclient.exceptions import TaigaAuthenticationError, TaigaException
 
 from src.config import TaigaSettings
 from src.taiga_client import (
@@ -230,6 +230,61 @@ class TestTaigaClientWrapperLogin:
         get.assert_not_called()
         assert "share-secret" not in caplog.text
         assert "short-lived" not in caplog.text
+
+
+class TestTokenLogin:
+    """TAIGA_AUTH_TOKEN replaces the password; the Pangolin session is still built first."""
+
+    def test_token_login_verifies_user_and_keeps_pangolin_session(self):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        fake_api = MagicMock()
+        fake_api.get.return_value = {"id": 1}
+        with (
+            patch.object(TaigaSettings, "get_pangolin_credentials", return_value=("id", "secret")),
+            patch.object(TaigaSettings, "get_pangolin_share_link", return_value=None),
+            patch.object(TaigaSettings, "get_pangolin_session", return_value=None),
+            patch("src.taiga_client._CompatTaigaClient", return_value=fake_api) as client,
+        ):
+            assert wrapper.login_with_token("app-token", "Application")
+        assert client.call_args.kwargs["session"].headers["P-Access-Token"] == "secret"
+        fake_api.update_token.assert_called_once_with("app-token", "Application")
+        fake_api.get.assert_called_once_with("/users/me")
+        assert wrapper.api is fake_api
+
+    def test_rejected_token_names_the_login_tool(self, caplog):
+        wrapper = TaigaClientWrapper(host="https://taiga.example")
+        fake_api = MagicMock()
+        fake_api.get.side_effect = TaigaAuthenticationError.__new__(TaigaAuthenticationError)
+        with (
+            patch.object(TaigaSettings, "get_pangolin_credentials", return_value=None),
+            patch.object(TaigaSettings, "get_pangolin_share_link", return_value=None),
+            patch.object(TaigaSettings, "get_pangolin_session", return_value=None),
+            patch("src.taiga_client._CompatTaigaClient", return_value=fake_api),
+        ):
+            with pytest.raises(TaigaException, match="run taiga-login again"):
+                wrapper.login_with_token("app-token")
+        assert wrapper.api is None
+        assert "app-token" not in caplog.text
+
+
+def test_auth_token_settings_take_precedence_and_tolerate_empty_values():
+    assert TaigaSettings(TAIGA_AUTH_TOKEN="").get_auth_token() is None
+    assert TaigaSettings(TAIGA_AUTH_TOKEN="t", TAIGA_TOKEN_TYPE="").get_auth_token() == (
+        "t",
+        "Application",
+    )
+    assert TaigaSettings(TAIGA_AUTH_TOKEN="t", TAIGA_TOKEN_TYPE="bearer").get_auth_token() == (
+        "t",
+        "Bearer",
+    )
+    with pytest.raises(ValueError, match="TAIGA_TOKEN_TYPE"):
+        TaigaSettings(TAIGA_AUTH_TOKEN="t", TAIGA_TOKEN_TYPE="Basic").get_auth_token()
+    assert TaigaSettings(TAIGA_AUTH_TOKEN="t").has_credentials
+    assert TaigaSettings(TAIGA_USERNAME="u", TAIGA_PASSWORD="p").has_credentials
+    # The checkout's .env may supply a password; override it to test the negative case.
+    assert not TaigaSettings(
+        TAIGA_USERNAME="u", TAIGA_PASSWORD="", TAIGA_AUTH_TOKEN=""
+    ).has_credentials
 
 
 _USER_SESSION = ("https://connect.example", "user-session-token", "p_session_token")

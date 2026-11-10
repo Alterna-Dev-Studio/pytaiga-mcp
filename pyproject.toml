@@ -31,6 +31,7 @@ dev = [
 [project.scripts]
 mcp-taiga-workflow = "src.server_workflow:main"
 mcp-taiga-full = "src.server_full:main"
+mcp-taiga-login = "src.taiga_login:main"
 
 [project.readme]
 file = "README.md"

@@ -446,9 +446,13 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[None]:
         logger.info("Environment credentials detected. Attempting auto-authentication...")
         try:
             wrapper = TaigaClientWrapper(host=settings.host)
-            success = wrapper.login(
-                username=settings.get_username_value(), password=settings.get_password_value()
-            )
+            token = settings.get_auth_token()
+            if token:
+                success = wrapper.login_with_token(*token)
+            else:
+                success = wrapper.login(
+                    username=settings.get_username_value(), password=settings.get_password_value()
+                )
             if success:
                 _bind_session(DEFAULT_SESSION_ID, wrapper)
                 logger.info(
