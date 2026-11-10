@@ -290,27 +290,17 @@ An organization Settings → API Keys key is for Pangolin's management API, and
 a `pangolin-key-…` key is for Pangolin's AI Gateway. Neither grants access to
 a protected Taiga HTTP resource.
 
-Save the Share Link in the local, ignored `.env` file as
-`PANGOLIN_RESOURCE_TOKEN`. If you use the shared SAASDK toolkit, its setup
-command can open the Pangolin dashboard and write that value for this or other
-consumer repositories:
-
-```bash
-saasdk pangolin-setup --env-file .env
-```
-
-Run it from this repository in an interactive terminal and paste the complete
-Share Link URL. In a non-interactive shell, pipe the link on standard input:
-
-```bash
-printf '%s\n' "$PANGOLIN_SHARE_LINK" | saasdk pangolin-setup --env-file .env --token-stdin
-```
-
-It does not obtain a token from browser login automatically. Restart the MCP server
-after setup. For Docker, pass `PANGOLIN_RESOURCE_TOKEN` into the container as an environment
-variable. Pangolin may use a different resource session request parameter; set
-`PANGOLIN_SESSION_REQUEST_PARAM` to match your Pangolin configuration if needed.
-Scope the token to the Taiga resource and set an appropriate expiry.
+Provide `PANGOLIN_RESOURCE_TOKEN` through whatever supplies the server's
+environment: the local, ignored `.env` file for a bare `uv run`, a container
+environment variable for Docker, or your launcher's secret store. The server
+does not obtain a token itself. If you launch it from a `dev-env-template`
+checkout, its `scripts/pangolin-token` script collects and validates the Share
+Link and `scripts/pangolin-configure SCOPE` stores it in the encrypted scope
+that `scripts/taiga-mcp` reads; see that repository's README. Restart the MCP
+server after changing the token. Pangolin may use a different resource session
+request parameter; set `PANGOLIN_SESSION_REQUEST_PARAM` to match your Pangolin
+configuration if needed. Scope the token to the Taiga resource and set an
+appropriate expiry.
 
 **Security Note**: Credentials are protected and will never appear in logs, error messages, or stack traces. When `TAIGA_USERNAME` and `TAIGA_PASSWORD` are configured, the server auto-authenticates on startup - no manual login required.
 
