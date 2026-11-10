@@ -101,6 +101,21 @@ class TaigaSettings(BaseSettings):
         alias="PANGOLIN_SESSION_REQUEST_PARAM",
         description="Pangolin's resource session request query parameter",
     )
+    pangolin_dashboard_url: Optional[str] = Field(
+        default=None,
+        alias="PANGOLIN_DASHBOARD_URL",
+        description="Pangolin dashboard origin that issued the user session token",
+    )
+    pangolin_session_token: Optional[SecretStr] = Field(
+        default=None,
+        alias="PANGOLIN_SESSION_TOKEN",
+        description="Pangolin user session token from a device code login",
+    )
+    pangolin_session_cookie: str = Field(
+        default="p_session_token",
+        alias="PANGOLIN_SESSION_COOKIE",
+        description="Pangolin's user session cookie name",
+    )
 
     class Config:
         env_file = str(ENV_FILE_PATH)
@@ -146,6 +161,36 @@ class TaigaSettings(BaseSettings):
         if not self.pangolin_resource_token:
             return None
         return parse_pangolin_share_link(self.pangolin_resource_token.get_secret_value())
+
+    def get_pangolin_session(self) -> Optional[tuple[str, str, str]]:
+        """Return (dashboard origin, user session token, cookie name) if configured."""
+        token = (
+            self.pangolin_session_token.get_secret_value() if self.pangolin_session_token else ""
+        )
+        if not token:
+            return None
+        if not self.pangolin_dashboard_url:
+            raise ValueError("PANGOLIN_DASHBOARD_URL is required with PANGOLIN_SESSION_TOKEN")
+        dashboard = urlsplit(self.pangolin_dashboard_url)
+        if (
+            dashboard.scheme != "https"
+            or not dashboard.hostname
+            or dashboard.username
+            or dashboard.password
+            or dashboard.path not in ("", "/")
+            or dashboard.query
+            or dashboard.fragment
+        ):
+            raise ValueError("PANGOLIN_DASHBOARD_URL must be an HTTPS origin")
+        if token.split() != [token] or "." in token or "://" in token:
+            raise ValueError(
+                "PANGOLIN_SESSION_TOKEN must be a Pangolin user session token from pangolin-login"
+            )
+        # Launchers may export an empty value for an unset variable; keep the default then.
+        cookie = self.pangolin_session_cookie or "p_session_token"
+        if not cookie.replace("_", "").replace("-", "").isalnum():
+            raise ValueError("Invalid Pangolin session cookie name")
+        return f"https://{dashboard.netloc}", token, cookie
 
 
 def mask_credential(value: str, visible_chars: int = 2) -> str:

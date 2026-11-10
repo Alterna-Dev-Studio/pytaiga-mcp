@@ -249,6 +249,9 @@ The bridge can be configured through environment variables or a `.env` file:
 | `TAIGA_API_URL` | Base URL for the Taiga API | http://localhost:9000 |
 | `TAIGA_USERNAME` | Taiga username for auto-authentication | (none) |
 | `TAIGA_PASSWORD` | Taiga password for auto-authentication | (none) |
+| `PANGOLIN_DASHBOARD_URL` | Pangolin dashboard origin for a user session | (none) |
+| `PANGOLIN_SESSION_TOKEN` | Pangolin user session token from `pangolin-login` | (none) |
+| `PANGOLIN_SESSION_COOKIE` | Pangolin user session cookie name | `p_session_token` |
 | `PANGOLIN_RESOURCE_TOKEN` | Pangolin `/s/…` Share Link URL or `ID.token` | (none) |
 | `PANGOLIN_SESSION_REQUEST_PARAM` | Pangolin resource session request parameter | `resource_session_request_param` |
 | `PANGOLIN_ACCESS_TOKEN_ID` | Pangolin resource access token ID | (none) |
@@ -270,7 +273,25 @@ LOG_LEVEL=INFO
 
 ### Taiga behind Pangolin
 
-If Pangolin protects your Taiga API as a public resource, select **View as Admin**
+If Pangolin protects your Taiga API, the simplest option is your own Pangolin
+login. Run the dev-env `pangolin-login` script (a device code you confirm in the
+browser with your own account, including 2FA or an external identity provider)
+and store its token as `PANGOLIN_SESSION_TOKEN` together with
+`PANGOLIN_DASHBOARD_URL`, the dashboard origin that issued it. On login the
+bridge requests the Taiga root like a browser; when Pangolin redirects to the
+configured dashboard, the bridge presents the session token there, follows the
+resulting one-shot request back to the Taiga origin, and keeps the resource
+cookie Pangolin sets for all Taiga requests. A plain `200` instead of a
+redirect (for example on a LAN with split DNS) means Taiga is not proxied from
+that network, and the bridge logs in directly. If the dashboard shows its own
+page instead of redirecting, the error says `Pangolin session expired or has no
+access to this resource; run pangolin-login again`. The token is only ever sent
+to `PANGOLIN_DASHBOARD_URL`; a redirect to any other host is rejected. Set
+`PANGOLIN_SESSION_COOKIE` only if your Pangolin uses a non-default
+`session_cookie_name`. A session token takes precedence over the Share Link
+settings below.
+
+Alternatively, an admin can create a Share Link for a service account. Select **View as Admin**
 in Pangolin, then go to **Settings → Share Links**. Create a Share Link for the
 Taiga resource and copy the link URL (or its `p_token=ID.token` value). The
 resource picker initially shows only 10 entries; search by the Taiga hostname.
