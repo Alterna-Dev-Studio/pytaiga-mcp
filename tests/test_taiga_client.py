@@ -315,7 +315,7 @@ class TestPangolinUserSession:
 
     def test_expired_session_names_the_login_tool(self, caplog):
         wrapper = TaigaClientWrapper(host="https://taiga.example")
-        with pytest.raises(TaigaException, match="run pangolin-login again"):
+        with pytest.raises(TaigaException, match="sign in again with dv taiga-login"):
             self._login(
                 wrapper,
                 [

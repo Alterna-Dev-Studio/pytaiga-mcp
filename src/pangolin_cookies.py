@@ -66,7 +66,7 @@ def main(argv: list[str]) -> int:
         if settings.get_pangolin_credentials():
             print(
                 "pangolin_cookies: Pangolin access-token headers cannot be used from a cookie "
-                "jar; store a session with pangolin-login and pangolin-configure instead",
+                "jar; store a session with dv taiga-login instead",
                 file=sys.stderr,
             )
             return 2

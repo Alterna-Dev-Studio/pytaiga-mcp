@@ -76,12 +76,12 @@ def test_other_host_gets_empty_jar_without_handshake(tmp_path, monkeypatch, conf
 def test_handshake_failure_exits_1_and_writes_nothing(tmp_path, monkeypatch, capsys, configured):
     def fail(host):
         raise ValueError(
-            "Pangolin session expired or has no access to this resource; run pangolin-login again"
+            "Pangolin session expired or has no access to this resource; sign in again with dv taiga-login"
         )
 
     status, jar, _ = _run(tmp_path, monkeypatch, fail)
     assert status == 1 and not jar.exists()
-    assert "run pangolin-login again" in capsys.readouterr().err
+    assert "sign in again with dv taiga-login" in capsys.readouterr().err
     assert list(tmp_path.iterdir()) == []
 
 

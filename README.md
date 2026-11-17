@@ -282,9 +282,10 @@ Pick one of two credentials. If both are set, the session token wins.
 
 **Option 1: your own Pangolin login (recommended)**
 
-Run the dev-env `pangolin-login` script. It shows a device code, you confirm it
-in your browser with your own Pangolin account (2FA or SSO included), and it
-prints a session token. Set:
+With `dev-env-template`, run `dv taiga-login`: it shows a device code, you
+confirm it in your browser with your own Pangolin account (2FA or SSO included),
+and it stores the session in your vault scope. Without it, the dev-env
+`pangolin-login` script prints the session token instead. Set:
 
 ```
 PANGOLIN_DASHBOARD_URL=https://pangolin.example.com   # the Pangolin host; https, no path
@@ -322,9 +323,9 @@ Failures appear in the server log as `Unexpected login error: …`.
 - On a LAN where Taiga's hostname resolves directly (split DNS), the log says
   `Taiga is not behind Pangolin from this network; skipping` and the bridge
   logs in to Taiga directly. This is normal.
-- `Pangolin session expired or has no access to this resource; run
-  pangolin-login again`: run `pangolin-login` for a new token, or ask an admin
-  to grant your user the Taiga resource.
+- `Pangolin session expired or has no access to this resource; sign in again
+  with dv taiga-login (or pangolin-login)`: sign in again for a new session, or
+  ask an admin to grant your user the Taiga resource.
 - `Pangolin did not redirect to the configured dashboard`:
   `PANGOLIN_DASHBOARD_URL` is not the host Taiga redirects to.
 - `Pangolin rejected the Share Link`: the link is expired, revoked or mistyped.
