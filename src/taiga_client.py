@@ -146,7 +146,7 @@ def _start_pangolin_user_session(
             if not location:
                 raise ValueError(
                     "Pangolin session expired or has no access to this resource; "
-                    "run pangolin-login again"
+                    "sign in again with dv taiga-login (or pangolin-login)"
                 )
         else:
             raise ValueError("Pangolin resource authentication failed")
