@@ -333,6 +333,22 @@ Failures appear in the server log as `Unexpected login error: …`.
 - `PANGOLIN_DASHBOARD_URL is required with PANGOLIN_SESSION_TOKEN` or `Both
   Pangolin access token variables are required`: one half of a pair is missing.
 
+**REST scripts**
+
+Scripts that call the Taiga REST API with `curl` or `urllib` can pass Pangolin the
+same way. Run, from this checkout with the same environment:
+
+```
+.venv/bin/python -m src.pangolin_cookies --cookie-jar PATH
+```
+
+It writes a Netscape cookie jar (mode 0600) for `curl -b PATH` or
+`http.cookiejar.MozillaCookieJar` (load with `ignore_discard=True`). The jar is empty
+when Pangolin is not configured or Taiga is not behind Pangolin from this network.
+Nothing is printed on stdout and errors never include secrets; it exits 1 on errors
+like those above and 2 for `PANGOLIN_ACCESS_TOKEN*` headers, which a cookie jar
+cannot carry. `dev-env-template`'s `scripts/taiga-session` wraps it.
+
 **Rarely needed**
 
 - `PANGOLIN_SESSION_COOKIE` (default `p_session_token`): only if your
