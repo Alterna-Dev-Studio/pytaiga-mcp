@@ -248,6 +248,37 @@ class _CompatTaigaClient(TaigaClient):
         return super().get(path, params=params, **kwargs)
 
 
+def start_pangolin_session(taiga_host: str) -> Optional[_PangolinSession]:
+    """Return a session that passes Pangolin for taiga_host, or None if Pangolin is not configured.
+
+    On a network where Taiga is not behind Pangolin the session is returned without cookies.
+    """
+    pangolin_session = settings.get_pangolin_session()
+    pangolin_share_link = settings.get_pangolin_share_link()
+    pangolin_credentials = settings.get_pangolin_credentials()
+    if not (pangolin_session or pangolin_share_link or pangolin_credentials):
+        return None
+    session = _PangolinSession()
+    if pangolin_session:
+        _start_pangolin_user_session(session, *pangolin_session, taiga_host)
+    elif pangolin_share_link:
+        _start_pangolin_share_session(
+            session,
+            *pangolin_share_link,
+            taiga_host,
+            # Launchers may export an empty value for an unset variable.
+            settings.pangolin_session_request_param or "resource_session_request_param",
+        )
+    else:
+        session.headers.update(
+            {
+                "P-Access-Token-Id": pangolin_credentials[0],
+                "P-Access-Token": pangolin_credentials[1],
+            }
+        )
+    return session
+
+
 class TaigaClientWrapper:
     """
     A wrapper around the pytaiga-client library to manage API instance
@@ -272,30 +303,10 @@ class TaigaClientWrapper:
             # SECURITY: Don't log username to avoid credential exposure
             logger.info(f"Attempting login on {self.host}")
             # Initialize the client here (compat subclass; see _CompatTaigaClient).
-            pangolin_session = settings.get_pangolin_session()
-            pangolin_share_link = settings.get_pangolin_share_link()
-            pangolin_credentials = settings.get_pangolin_credentials()
-            if pangolin_session or pangolin_share_link or pangolin_credentials:
+            session = start_pangolin_session(self.host)
+            if session is not None:
                 # pytaigaclient logs complete request headers at DEBUG level.
                 logging.getLogger("pytaigaclient.client").setLevel(logging.INFO)
-                session = _PangolinSession()
-                if pangolin_session:
-                    _start_pangolin_user_session(session, *pangolin_session, self.host)
-                elif pangolin_share_link:
-                    _start_pangolin_share_session(
-                        session,
-                        *pangolin_share_link,
-                        self.host,
-                        # Launchers may export an empty value for an unset variable.
-                        settings.pangolin_session_request_param or "resource_session_request_param",
-                    )
-                else:
-                    session.headers.update(
-                        {
-                            "P-Access-Token-Id": pangolin_credentials[0],
-                            "P-Access-Token": pangolin_credentials[1],
-                        }
-                    )
                 api_instance = _CompatTaigaClient(host=self.host, session=session)
             else:
                 api_instance = _CompatTaigaClient(host=self.host)
